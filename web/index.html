@@ -141,8 +141,8 @@
     pointer-events: none;
   }
   #chart {
-    position: absolute; left: 0; right: 0; bottom: 0;
-    width: 100%; height: 60%;
+    position: absolute; inset: 0;
+    width: 100%; height: 100%;
     display: block;
     pointer-events: auto;
     cursor: crosshair;
@@ -166,44 +166,13 @@
   #tooltip .v.flow { color: var(--cream); }
   #tooltip .v.t { color: var(--fg); }
 
-  /* receipt card — shot end summary */
-  #receipt {
-    position: absolute; bottom: 28px; left: 36px; z-index: 6;
-    background: linear-gradient(180deg, rgba(36, 28, 22, 0.85), rgba(28, 22, 18, 0.95));
-    backdrop-filter: blur(10px);
-    border: 1px solid var(--line-bright); border-radius: 8px;
-    padding: 16px 22px; min-width: 320px;
-    box-shadow: 0 12px 40px rgba(0,0,0,0.5);
-    transform: translateY(20px); opacity: 0; pointer-events: none;
-    transition: transform 0.4s cubic-bezier(0.2, 0.9, 0.3, 1.2), opacity 0.3s;
+  #subhero #stat-pre, #subhero #stat-peak {
+    opacity: 0; transform: translateY(-4px);
+    transition: opacity 0.3s 0.05s, transform 0.3s 0.05s;
   }
-  #receipt.visible { transform: translateY(0); opacity: 1; pointer-events: auto; }
-  #receipt .head {
-    display: flex; justify-content: space-between; align-items: baseline;
-    margin-bottom: 12px;
+  #subhero #stat-pre.visible, #subhero #stat-peak.visible {
+    opacity: 1; transform: translateY(0);
   }
-  #receipt .head .title {
-    font-family: 'Fraunces', serif; font-style: italic; font-weight: 400;
-    font-size: 13px; color: var(--copper-bright); letter-spacing: 0.04em;
-  }
-  #receipt .head .close {
-    background: none; border: none; color: var(--dim); cursor: pointer;
-    font-size: 18px; line-height: 1; padding: 0; transition: color 0.15s;
-  }
-  #receipt .head .close:hover { color: var(--fg); }
-  #receipt .stats {
-    display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px;
-  }
-  #receipt .stat .label {
-    font-size: 9px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--dim);
-    margin-bottom: 4px;
-  }
-  #receipt .stat .value {
-    font-family: 'Fraunces', serif; font-weight: 300;
-    font-size: 26px; color: var(--cream); font-variant-numeric: tabular-nums;
-    letter-spacing: -0.02em; line-height: 1;
-  }
-  #receipt .stat .value .u { font-size: 12px; color: var(--dim); margin-left: 2px; font-style: italic; }
 
   /* ---------- history panel ---------- */
   #history {
@@ -284,6 +253,8 @@
       <div id="subhero">
         <div><span class="label">elapsed</span><span id="elapsed-v">0.0s</span></div>
         <div><span class="label">flow</span><span id="flow-v">0.00 g/s</span></div>
+        <div id="stat-pre" style="display:none"><span class="label">preinfusion</span><span id="pre-v">—s</span></div>
+        <div id="stat-peak" style="display:none"><span class="label">peak</span><span id="peak-v">— g/s</span></div>
       </div>
     </div>
 
@@ -329,18 +300,6 @@
       </div>
     </div>
 
-    <div id="receipt">
-      <div class="head">
-        <span class="title">Shot complete</span>
-        <button class="close" id="receipt-close" aria-label="Dismiss">×</button>
-      </div>
-      <div class="stats">
-        <div class="stat"><div class="label">Yield</div><div class="value"><span id="r-yield">—</span><span class="u">g</span></div></div>
-        <div class="stat"><div class="label">Time</div><div class="value"><span id="r-time">—</span><span class="u">s</span></div></div>
-        <div class="stat"><div class="label">Preinfusion</div><div class="value"><span id="r-pre">—</span><span class="u">s</span></div></div>
-        <div class="stat"><div class="label">Peak flow</div><div class="value"><span id="r-peak">—</span><span class="u">g/s</span></div></div>
-      </div>
-    </div>
   </div>
 
   <aside id="history">
@@ -367,8 +326,11 @@ const flowV = $('flow-v');
 const mainEl = $('main');
 const historyList = $('history-list');
 const heroEl = $('hero');
-const receiptEl = $('receipt');
 const tooltip = $('tooltip');
+const statPre = $('stat-pre');
+const statPeak = $('stat-peak');
+const preV = $('pre-v');
+const peakV = $('peak-v');
 
 let mode = 'live';
 let activeShotId = null;
@@ -568,16 +530,24 @@ function setBadge(text, cls) {
   stateBadge.className = `badge ${cls}`;
 }
 
-// ---------- receipt ----------
-function showReceipt(p) {
-  $('r-yield').textContent = p.final_weight_g != null ? p.final_weight_g.toFixed(1) : '—';
-  $('r-time').textContent = p.duration_s != null ? p.duration_s.toFixed(1) : '—';
-  $('r-pre').textContent = p.preinfusion_s != null ? p.preinfusion_s.toFixed(1) : '—';
-  $('r-peak').textContent = p.peak_flow_g_s != null ? p.peak_flow_g_s.toFixed(2) : '—';
-  receiptEl.classList.add('visible');
+// ---------- shot-end stats (inline in subhero) ----------
+function showStats(p) {
+  preV.textContent = (p.preinfusion_s != null ? p.preinfusion_s.toFixed(1) : '—') + 's';
+  peakV.textContent = (p.peak_flow_g_s != null ? p.peak_flow_g_s.toFixed(2) : '—') + ' g/s';
+  statPre.style.display = '';
+  statPeak.style.display = '';
+  // next frame so the transition fires
+  requestAnimationFrame(() => {
+    statPre.classList.add('visible');
+    statPeak.classList.add('visible');
+  });
 }
-function hideReceipt() { receiptEl.classList.remove('visible'); }
-$('receipt-close').addEventListener('click', hideReceipt);
+function hideStats() {
+  statPre.classList.remove('visible');
+  statPeak.classList.remove('visible');
+  statPre.style.display = 'none';
+  statPeak.style.display = 'none';
+}
 
 // ---------- subhero values ----------
 function setElapsed(s) { elapsedV.textContent = (Number.isFinite(s) ? s : 0).toFixed(1) + 's'; }
@@ -618,7 +588,7 @@ client.on('message', (topic, msg) => {
   if (topic === 'coffee/shot/start') {
     activeShotId = p.shot_id;
     chart.reset();
-    hideReceipt();
+    hideStats();
     setBadge('Extracting', 'extracting');
     displayedWeight = 0; setWeight(0);
     setElapsed(0); setFlow(0);
@@ -643,7 +613,7 @@ client.on('message', (topic, msg) => {
     if (p.final_weight_g != null) setWeight(p.final_weight_g);
     if (p.duration_s != null) setElapsed(p.duration_s);
     setFlow(p.peak_flow_g_s ?? 0);
-    showReceipt(p);
+    showStats(p);
     loadHistory();
   }
 });
@@ -700,7 +670,7 @@ async function replayShot(file) {
     setElapsed(shot.duration_s ?? 0);
     setFlow(shot.peak_flow_g_s ?? 0);
     if (shot.tank_pct_at_start != null) tankV.textContent = Math.round(shot.tank_pct_at_start);
-    showReceipt(shot);
+    showStats(shot);
     loadHistory();
   } catch (e) {
     statusEl.textContent = `replay failed: ${e.message}`;
@@ -715,7 +685,7 @@ function backToLive() {
   chart.reset();
   setWeight(0); setElapsed(0); setFlow(0);
   weightV.textContent = '—';
-  hideReceipt();
+  hideStats();
   setBadge('Idle', 'idle');
   loadHistory();
 }
