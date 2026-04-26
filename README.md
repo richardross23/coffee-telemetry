@@ -28,11 +28,11 @@ docker compose up -d
 
 Then:
 
-- Browser: <http://192.168.1.242:8418> — live shot dashboard
-- MQTT broker: `192.168.1.242:1883` — point the firmware here
+- Browser: <http://MAC_IP:8418> — live shot dashboard
+- MQTT broker: `MAC_IP:1883` — point the firmware here
 - Saved shots: `./shots/*.json`
 
-Substitute the Mac's LAN IP if it changes.
+Replace `MAC_IP` with the Mac's LAN address (`ipconfig getifaddr en0` on macOS).
 
 ## Pointing the firmware at this broker
 
@@ -40,7 +40,7 @@ In `firmware/coffee-tank.yaml` (in the water-meter repo) add:
 
 ```yaml
 mqtt:
-  broker: 192.168.1.242
+  broker: MAC_IP
   port: 1883
   discovery: false
   client_id: coffee-tank
