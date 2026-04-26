@@ -37,7 +37,7 @@ INDEX = "index.json"
 FILENAME_TS_RE = re.compile(r"^(\d{8}T\d{6}Z)_")
 
 SCALE_BUFFER_SEC = 30.0
-PREPEND_LOOKBACK_SEC = 5.0
+PREPEND_LOOKBACK_SEC = 10.0
 
 # Tare-event filter — the firmware fires shot/start on weight delta,
 # so taring the scale (or fiddling with the cup) currently produces

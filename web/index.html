@@ -371,7 +371,7 @@ let selectedFile = null;
 // Used to prepend the chart at shot/start so we see the *real* first drops
 // (the firmware's shot detector requires weight>1g, missing the lead-in).
 const SCALE_BUFFER_MS = 30000;
-const PREPEND_LOOKBACK_MS = 5000;
+const PREPEND_LOOKBACK_MS = 10000;
 const scaleBuffer = []; // {ts: epoch_ms, w: number}
 function pushScale(w) {
   if (!Number.isFinite(w)) return;
