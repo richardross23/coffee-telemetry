@@ -6,7 +6,7 @@ Home-server side of the espresso shot logger. Runs:
 - **shot-logger** — Python receiver that buffers `coffee/shot/sample` between
   start and end, writes one self-contained JSON file per shot to `./shots/`,
   and maintains `shots/index.json` for the history view
-- **web** — Caddy serving a Plotly dashboard on `8080` with a **Live** tab
+- **web** — Caddy serving a Plotly dashboard on `8418` with a **Live** tab
   (live curve + numeric weight/elapsed/flow overlay + state badge + tank %)
   and a **History** tab (click any past shot to replay on the same chart).
   `./shots/` is mounted read-only into Caddy at `/shots/`.
@@ -28,7 +28,7 @@ docker compose up -d
 
 Then:
 
-- Browser: <http://192.168.1.242:8080> — live shot dashboard
+- Browser: <http://192.168.1.242:8418> — live shot dashboard
 - MQTT broker: `192.168.1.242:1883` — point the firmware here
 - Saved shots: `./shots/*.json`
 
