@@ -253,8 +253,8 @@
       <div id="subhero">
         <div><span class="label">elapsed</span><span id="elapsed-v">0.0s</span></div>
         <div><span class="label">flow</span><span id="flow-v">0.00 g/s</span></div>
-        <div id="stat-pre" style="display:none"><span class="label">preinfusion</span><span id="pre-v">—s</span></div>
-        <div id="stat-peak" style="display:none"><span class="label">peak</span><span id="peak-v">— g/s</span></div>
+        <div id="stat-pre"><span class="label">preinfusion</span><span id="pre-v">—s</span></div>
+        <div id="stat-peak"><span class="label">peak</span><span id="peak-v">— g/s</span></div>
       </div>
     </div>
 
@@ -534,19 +534,12 @@ function setBadge(text, cls) {
 function showStats(p) {
   preV.textContent = (p.preinfusion_s != null ? p.preinfusion_s.toFixed(1) : '—') + 's';
   peakV.textContent = (p.peak_flow_g_s != null ? p.peak_flow_g_s.toFixed(2) : '—') + ' g/s';
-  statPre.style.display = '';
-  statPeak.style.display = '';
-  // next frame so the transition fires
-  requestAnimationFrame(() => {
-    statPre.classList.add('visible');
-    statPeak.classList.add('visible');
-  });
+  statPre.classList.add('visible');
+  statPeak.classList.add('visible');
 }
 function hideStats() {
   statPre.classList.remove('visible');
   statPeak.classList.remove('visible');
-  statPre.style.display = 'none';
-  statPeak.style.display = 'none';
 }
 
 // ---------- subhero values ----------
