@@ -1,0 +1,35 @@
+services:
+  mosquitto:
+    image: eclipse-mosquitto:2
+    container_name: mosquitto
+    restart: unless-stopped
+    ports:
+      - "1883:1883"
+      - "9001:9001"
+    volumes:
+      - ./mosquitto/config:/mosquitto/config
+      - ./mosquitto/data:/mosquitto/data
+      - ./mosquitto/log:/mosquitto/log
+
+  shot-logger:
+    image: python:3-slim
+    container_name: shot-logger
+    restart: unless-stopped
+    command: sh -c "pip install --quiet paho-mqtt && python -u /app/logger.py"
+    volumes:
+      - ./logger:/app
+      - ./shots:/data/shots
+    depends_on:
+      - mosquitto
+
+  web:
+    image: caddy:2-alpine
+    container_name: coffee-web
+    restart: unless-stopped
+    ports:
+      - "8080:80"
+    volumes:
+      - ./web:/usr/share/caddy
+      - ./web/Caddyfile:/etc/caddy/Caddyfile
+    depends_on:
+      - mosquitto

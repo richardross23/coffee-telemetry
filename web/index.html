@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Espresso shot — live</title>
+<script src="https://cdn.jsdelivr.net/npm/mqtt@5/dist/mqtt.min.js"></script>
+<script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
+<style>
+  body { margin: 0; font-family: -apple-system, system-ui, sans-serif; background: #111; color: #eee; }
+  header { padding: 12px 20px; display: flex; align-items: baseline; gap: 16px; border-bottom: 1px solid #333; }
+  h1 { font-size: 18px; margin: 0; font-weight: 500; }
+  #status { font-size: 13px; color: #888; }
+  #status.connected { color: #6c6; }
+  #status.error { color: #c66; }
+  #stats { font-size: 13px; color: #aaa; margin-left: auto; }
+  #g { width: 100%; height: calc(100vh - 60px); }
+</style>
+</head>
+<body>
+<header>
+  <h1>Espresso shot — live</h1>
+  <span id="status">connecting…</span>
+  <span id="stats"></span>
+</header>
+<div id="g"></div>
+<script>
+const statusEl = document.getElementById('status');
+const statsEl = document.getElementById('stats');
+
+const layout = {
+  paper_bgcolor: '#111',
+  plot_bgcolor: '#111',
+  font: { color: '#ccc' },
+  margin: { l: 50, r: 50, t: 20, b: 40 },
+  xaxis: { title: 'Seconds since pump-on', gridcolor: '#333' },
+  yaxis: { title: 'Weight (g)', gridcolor: '#333' },
+  yaxis2: { title: 'Flow (g/s)', overlaying: 'y', side: 'right' },
+  showlegend: true,
+  legend: { x: 0, y: 1 },
+};
+
+Plotly.newPlot('g', [
+  { x: [], y: [], name: 'Weight (g)', mode: 'lines', line: { color: '#6cf' } },
+  { x: [], y: [], name: 'Flow (g/s)', yaxis: 'y2', mode: 'lines', line: { color: '#fc6' } },
+], layout, { responsive: true });
+
+const wsUrl = `ws://${window.location.hostname}:9001`;
+const client = mqtt.connect(wsUrl, {
+  clientId: 'web-' + Math.random().toString(16).slice(2, 10),
+  reconnectPeriod: 2000,
+});
+
+client.on('connect', () => {
+  statusEl.textContent = `connected (${wsUrl})`;
+  statusEl.className = 'connected';
+  client.subscribe(['coffee/shot/start', 'coffee/shot/sample', 'coffee/shot/end']);
+});
+
+client.on('error', (err) => {
+  statusEl.textContent = `error: ${err.message}`;
+  statusEl.className = 'error';
+});
+
+client.on('reconnect', () => {
+  statusEl.textContent = 'reconnecting…';
+  statusEl.className = '';
+});
+
+client.on('message', (topic, msg) => {
+  let payload;
+  try { payload = JSON.parse(msg.toString()); } catch { return; }
+
+  if (topic === 'coffee/shot/start') {
+    Plotly.restyle('g', { x: [[], []], y: [[], []] }, [0, 1]);
+    statsEl.textContent = `shot ${payload.shot_id} — tank ${payload.tank_pct_at_start ?? '?'}%`;
+  } else if (topic === 'coffee/shot/sample') {
+    const t = payload.t_ms / 1000;
+    Plotly.extendTraces('g', {
+      x: [[t], [t]],
+      y: [[payload.weight_g], [payload.flow_g_s]],
+    }, [0, 1]);
+  } else if (topic === 'coffee/shot/end') {
+    statsEl.textContent =
+      `shot ${payload.shot_id} — ${payload.final_weight_g}g in ${payload.duration_s}s ` +
+      `(preinfusion ${payload.preinfusion_s}s, peak flow ${payload.peak_flow_g_s} g/s)`;
+  }
+});
+</script>
+</body>
+</html>

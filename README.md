@@ -1,0 +1,110 @@
+# coffee-telemetry
+
+Home-server side of the espresso shot logger. Runs:
+
+- **Mosquitto** — MQTT broker on `1883` (TCP) and `9001` (WebSockets)
+- **shot-logger** — Python receiver that writes one JSON file per shot to `./shots/`
+- **web** — Caddy serving a Plotly live-graph dashboard on `8080`
+
+The ESP32 firmware that publishes to this broker lives in
+[richardross23/water-meter](https://github.com/richardross23/water-meter).
+The data model is documented there in
+[`docs/mqtt-architecture.md`](https://github.com/richardross23/water-meter/blob/main/docs/mqtt-architecture.md).
+
+## Quick start
+
+Requires Docker (OrbStack or Docker Desktop).
+
+```sh
+git clone <this-repo> coffee-telemetry
+cd coffee-telemetry
+docker compose up -d
+```
+
+Then:
+
+- Browser: <http://192.168.1.242:8080> — live shot dashboard
+- MQTT broker: `192.168.1.242:1883` — point the firmware here
+- Saved shots: `./shots/*.json`
+
+Substitute the Mac's LAN IP if it changes.
+
+## Pointing the firmware at this broker
+
+In `firmware/coffee-tank.yaml` (in the water-meter repo) add:
+
+```yaml
+mqtt:
+  broker: 192.168.1.242
+  port: 1883
+  discovery: false
+  client_id: coffee-tank
+```
+
+…then re-flash. See the firmware repo's
+[`docs/mqtt-firmware-patch.md`](https://github.com/richardross23/water-meter/blob/main/docs/mqtt-firmware-patch.md)
+for the full patch.
+
+## Smoke test
+
+With the stack up:
+
+```sh
+# in one terminal — subscribe
+docker exec -it mosquitto mosquitto_sub -h localhost -t test
+
+# in another — publish
+docker exec -it mosquitto mosquitto_pub -h localhost -t test -m hello
+```
+
+The subscriber should print `hello`.
+
+To exercise the dashboard without the firmware connected, replay a saved shot:
+
+```sh
+docker exec -i mosquitto mosquitto_pub -h localhost -t coffee/shot/start \
+  -m '{"shot_id":"demo","tank_pct_at_start":73,"device":"coffee-tank"}'
+
+for t in 0 500 1000 1500 2000 2500 3000; do
+  docker exec -i mosquitto mosquitto_pub -h localhost -t coffee/shot/sample \
+    -m "{\"shot_id\":\"demo\",\"t_ms\":$t,\"weight_g\":$(echo "$t/200" | bc -l),\"flow_g_s\":1.5}"
+  sleep 0.2
+done
+```
+
+## Layout
+
+```
+docker-compose.yml
+mosquitto/
+  config/mosquitto.conf       # broker config — anonymous LAN access
+  data/                       # persistence (auto-populated)
+  log/                        # broker logs
+logger/
+  logger.py                   # subscribes to coffee/shot/end, writes JSON
+web/
+  Caddyfile
+  index.html                  # Plotly dashboard, paho-mqtt over WS
+shots/                        # captured shots, one JSON file each
+```
+
+## Operations
+
+```sh
+docker compose ps                     # status
+docker compose logs -f mosquitto      # broker logs
+docker compose logs -f shot-logger    # logger output (one line per saved shot)
+docker compose restart shot-logger    # after editing logger/logger.py
+docker compose down                   # stop everything (data persists)
+```
+
+## Notes
+
+- **No auth.** Broker is open to the LAN. Don't forward `1883`/`9001` past
+  the router. To add auth, generate a `mosquitto_passwd` file, mount it,
+  and flip `allow_anonymous false` in `mosquitto.conf`.
+- **Persistence** lives in `./mosquitto/data/` and `./shots/` — both are
+  bind-mounted, so the data survives `docker compose down`.
+- **Live graph only redraws on `coffee/shot/start`** — open the page mid-shot
+  and you'll see nothing until the next shot begins. The `coffee/shot/end`
+  payload is self-contained for after-the-fact replay.
