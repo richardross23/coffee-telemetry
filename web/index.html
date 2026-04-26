@@ -2,6 +2,8 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#14100c">
 <title>Espresso</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -120,20 +122,16 @@
   #subhero .label { color: var(--dim); margin-right: 6px; }
   #elapsed-v, #flow-v { font-variant-numeric: tabular-nums; color: var(--copper-bright); font-weight: 500; }
 
-  /* tank widget — small, top-right */
+  /* tank widget — sits in the header */
   #tank-widget {
-    position: absolute; top: 28px; right: 36px; z-index: 5;
-    text-align: right; pointer-events: none;
+    font-size: 11px; color: var(--fg-2); letter-spacing: 0.06em;
+    text-transform: uppercase;
+    padding: 5px 10px; border: 1px solid var(--line-bright); border-radius: 999px;
+    display: inline-flex; align-items: baseline; gap: 6px;
   }
-  #tank-widget .label {
-    font-size: 10px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--dim);
-  }
-  #tank-widget .v {
-    font-family: 'Fraunces', serif; font-weight: 300;
-    font-size: 36px; color: var(--fg-2); font-variant-numeric: tabular-nums;
-    letter-spacing: -0.02em;
-  }
-  #tank-widget .v::after { content: '%'; font-size: 18px; color: var(--dim); margin-left: 2px; }
+  #tank-widget .label { color: var(--dim); }
+  #tank-widget .v { color: var(--copper-bright); font-variant-numeric: tabular-nums; font-weight: 500; }
+  #tank-widget .v::after { content: '%'; color: var(--dim); margin-left: 1px; }
 
   /* chart */
   #chart-wrap {
@@ -231,6 +229,43 @@
   .row .duration { font-size: 11px; color: var(--fg-2); font-variant-numeric: tabular-nums; }
   .row .meta { font-size: 10px; color: var(--dim); letter-spacing: 0.04em; }
   #history-empty { padding: 40px 18px; color: var(--dim); font-size: 12px; text-align: center; font-style: italic; }
+
+  /* ---------- mobile / tablet ---------- */
+  @media (max-width: 900px) {
+    #stage { padding: 18px 22px; }
+    #hero { top: 18px; left: 22px; right: 22px; }
+    #weight { font-size: 96px; }
+    #weight .unit { font-size: 22px; }
+    #subhero { font-size: 12px; gap: 14px; flex-wrap: wrap; }
+  }
+  @media (max-width: 600px) {
+    header {
+      padding: 10px 14px; gap: 8px; flex-wrap: wrap;
+      row-gap: 8px;
+    }
+    .logo { font-size: 15px; }
+    .tab { padding: 4px 8px; font-size: 11px; }
+    .badge { padding: 4px 8px; font-size: 9px; }
+    #tank-widget { padding: 4px 8px; font-size: 10px; }
+    #status { font-size: 10px; flex-basis: 100%; text-align: right; }
+
+    #stage { padding: 14px 16px; }
+    #hero { top: 14px; left: 16px; right: 16px; }
+    #weight { font-size: 72px; }
+    #weight .unit { font-size: 18px; }
+    #subhero {
+      margin-top: 6px; font-size: 11px; gap: 8px 14px;
+      letter-spacing: 0.04em;
+    }
+    #subhero .label { margin-right: 4px; }
+
+    #history { width: 100vw; }
+    #tooltip { font-size: 11px; padding: 8px 11px; min-width: 110px; }
+  }
+  @media (max-width: 400px) {
+    #weight { font-size: 60px; }
+    #weight .unit { font-size: 16px; }
+  }
 </style>
 </head>
 <body>
@@ -243,6 +278,7 @@
   </div>
   <span class="badge idle" id="state-badge">Idle</span>
   <span class="badge offline" id="device-badge" style="display:none">Device offline</span>
+  <span id="tank-widget"><span class="label">tank</span> <span class="v" id="tank-v">—</span></span>
   <span id="status">connecting</span>
 </header>
 
@@ -256,11 +292,6 @@
         <div id="stat-pre"><span class="label">preinfusion</span><span id="pre-v">—s</span></div>
         <div id="stat-peak"><span class="label">peak</span><span id="peak-v">— g/s</span></div>
       </div>
-    </div>
-
-    <div id="tank-widget">
-      <div class="label">Tank</div>
-      <div class="v" id="tank-v">—</div>
     </div>
 
     <div id="chart-wrap">
@@ -382,6 +413,16 @@ class ShotChart {
     new ResizeObserver(() => { this.resize(); this.render(); }).observe(svg);
     svg.addEventListener('mousemove', (e) => this.onHover(e));
     svg.addEventListener('mouseleave', () => this.hideTooltip());
+    // Touch: tap or drag along the chart to scrub the tooltip
+    const onTouch = (e) => {
+      if (!e.touches.length) return;
+      e.preventDefault();
+      const t = e.touches[0];
+      this.onHover({ clientX: t.clientX, clientY: t.clientY });
+    };
+    svg.addEventListener('touchstart', onTouch, { passive: false });
+    svg.addEventListener('touchmove', onTouch, { passive: false });
+    svg.addEventListener('touchend', () => setTimeout(() => this.hideTooltip(), 1500));
   }
 
   resize() {
