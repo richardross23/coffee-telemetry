@@ -413,6 +413,13 @@ class ShotChart {
     this.fixedMaxW = 50;   // grams
     this.fixedMaxF = 3.5;  // g/s
 
+    // Flow is derived from the weight curve (the firmware's flow_g_s
+    // is currently broken — Acaia decoder bug), so we always overwrite
+    // s.f with a sliding-window derivative + EMA smoothing.
+    this.flowWindowS = 1.0;
+    this.flowEma = 0.4;
+    this.flowSmoothed = 0;
+
     this.bg = svg.querySelector('.grid-bg');
     this.preBand = svg.querySelector('.preinfusion-band');
     this.firstDrop = svg.querySelector('.first-drop');
@@ -469,15 +476,40 @@ class ShotChart {
   setShot(samples, meta) {
     this.samples = (samples || []).filter(s => Number.isFinite(s.t) && Number.isFinite(s.w));
     this.meta = meta || {};
+    // Recompute flow for every sample (overrides whatever the firmware sent).
+    this.flowSmoothed = 0;
+    for (let i = 0; i < this.samples.length; i++) this._deriveFlowAt(i);
     this.render();
   }
   appendSample(s) {
     if (!Number.isFinite(s.t) || !Number.isFinite(s.w)) return;
     this.samples.push(s);
+    this._deriveFlowAt(this.samples.length - 1);
     this.render();
   }
   setMeta(meta) { Object.assign(this.meta, meta); this.render(); }
-  reset() { this.samples = []; this.meta = {}; this.render(); }
+  reset() { this.samples = []; this.meta = {}; this.flowSmoothed = 0; this.render(); }
+
+  // Sliding-window derivative + EMA smoothing. Mutates samples[i].f.
+  _deriveFlowAt(i) {
+    const s = this.samples[i];
+    const tStart = s.t - this.flowWindowS;
+    let j = i;
+    while (j > 0 && this.samples[j - 1].t >= tStart) j--;
+    const dT = s.t - this.samples[j].t;
+    const dW = s.w - this.samples[j].w;
+    const raw = dT > 0 ? dW / dT : 0;
+    // Negative spurts (scale jitter / drips falling unevenly) clamp to 0
+    const clamped = raw > 0 ? raw : 0;
+    this.flowSmoothed = this.flowEma * clamped + (1 - this.flowEma) * this.flowSmoothed;
+    s.f = this.flowSmoothed;
+  }
+
+  peakFlow() {
+    let p = 0;
+    for (const s of this.samples) if (s.f > p) p = s.f;
+    return p;
+  }
 
   render() {
     if (!this.samples.length) {
@@ -666,10 +698,11 @@ client.on('message', (topic, msg) => {
       setBadge('Extracting', 'extracting');
     }
     const t = (p.t_ms ?? 0) / 1000;
-    chart.appendSample({ t, w: p.weight_g, f: p.flow_g_s });
+    // Ignore p.flow_g_s — chart derives flow from weight (firmware bug).
+    chart.appendSample({ t, w: p.weight_g, f: 0 });
     setWeight(p.weight_g ?? 0);
     setElapsed(t);
-    setFlow(p.flow_g_s);
+    setFlow(chart.samples.at(-1)?.f);
   } else if (topic === 'coffee/shot/end') {
     activeShotId = null;
     setBadge('Done', 'done');
@@ -679,8 +712,9 @@ client.on('message', (topic, msg) => {
     });
     if (p.final_weight_g != null) setWeight(p.final_weight_g);
     if (p.duration_s != null) setElapsed(p.duration_s);
-    setFlow(p.peak_flow_g_s ?? 0);
-    showStats(p);
+    const peak = chart.peakFlow();
+    setFlow(peak);
+    showStats({ ...p, peak_flow_g_s: peak });
     loadHistory();
   }
 });
@@ -749,9 +783,10 @@ async function replayShot(file) {
     });
     setWeight(shot.final_weight_g ?? 0);
     setElapsed(shot.duration_s ?? 0);
-    setFlow(shot.peak_flow_g_s ?? 0);
+    const peak = chart.peakFlow();
+    setFlow(peak);
     if (shot.tank_pct_at_start != null) tankV.textContent = Math.round(shot.tank_pct_at_start);
-    showStats(shot);
+    showStats({ ...shot, peak_flow_g_s: peak });
     loadHistory();
   } catch (e) {
     statusEl.textContent = `replay failed: ${e.message}`;
