@@ -86,6 +86,20 @@ def parse_ts(filename: str) -> str:
     return f"{s[0:4]}-{s[4:6]}-{s[6:8]}T{s[9:11]}:{s[11:13]}:{s[13:15]}Z"
 
 
+def first_drop_t_ms(samples: list[dict], threshold: float = 0.1) -> int | None:
+    """First t_ms where weight crosses threshold for two consecutive samples."""
+    consecutive = 0
+    for i, s in enumerate(samples):
+        w = s.get("weight_g") or 0
+        if w >= threshold:
+            consecutive += 1
+            if consecutive >= 2:
+                return samples[i - 1].get("t_ms")
+        else:
+            consecutive = 0
+    return None
+
+
 def rebuild_index() -> None:
     """Scan OUT for shot files and rewrite index.json (newest first)."""
     entries = []
@@ -98,15 +112,24 @@ def rebuild_index() -> None:
                 data = json.load(f)
         except (OSError, json.JSONDecodeError):
             continue
+        samples = data.get("samples") or []
+        first_t = first_drop_t_ms(samples)
+        last_t = samples[-1].get("t_ms") if samples else None
+        pour_time_s = (
+            (last_t - first_t) / 1000.0
+            if first_t is not None and last_t is not None
+            else None
+        )
         entries.append({
             "file": name,
             "saved_at": parse_ts(name),
             "shot_id": data.get("shot_id"),
             "duration_s": data.get("duration_s"),
+            "pour_time_s": pour_time_s,
             "final_weight_g": data.get("final_weight_g"),
             "peak_flow_g_s": data.get("peak_flow_g_s"),
             "tank_pct_at_start": data.get("tank_pct_at_start"),
-            "n_samples": len(data.get("samples", [])),
+            "n_samples": len(samples),
         })
     tmp = os.path.join(OUT, INDEX + ".tmp")
     with open(tmp, "w") as f:

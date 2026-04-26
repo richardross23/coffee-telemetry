@@ -511,6 +511,35 @@ class ShotChart {
     return p;
   }
 
+  // Time of the literal first drop — first index where weight stays
+  // above 0.1g for two consecutive samples (single-sample spikes don't
+  // count). Returns null if no drop yet.
+  firstDropT() {
+    const threshold = 0.1;
+    let consecutive = 0;
+    for (let i = 0; i < this.samples.length; i++) {
+      if ((this.samples[i].w || 0) >= threshold) {
+        consecutive++;
+        if (consecutive >= 2) return this.samples[i - 1].t;
+      } else {
+        consecutive = 0;
+      }
+    }
+    return null;
+  }
+  // Acaia-style pour time: last sample's t minus first-drop t.
+  pourTime() {
+    const t0 = this.firstDropT();
+    if (t0 == null || !this.samples.length) return 0;
+    return this.samples.at(-1).t - t0;
+  }
+  // Live elapsed at sample time t (clamped to 0 before first drop).
+  elapsedAt(t) {
+    const t0 = this.firstDropT();
+    if (t0 == null) return 0;
+    return Math.max(0, t - t0);
+  }
+
   render() {
     if (!this.samples.length) {
       this.weightCurve.setAttribute('d', '');
@@ -701,7 +730,7 @@ client.on('message', (topic, msg) => {
     // Ignore p.flow_g_s — chart derives flow from weight (firmware bug).
     chart.appendSample({ t, w: p.weight_g, f: 0 });
     setWeight(p.weight_g ?? 0);
-    setElapsed(t);
+    setElapsed(chart.elapsedAt(t));
     setFlow(chart.samples.at(-1)?.f);
   } else if (topic === 'coffee/shot/end') {
     activeShotId = null;
@@ -711,7 +740,7 @@ client.on('message', (topic, msg) => {
       first_drop_at_ms: p.first_drop_at_ms,
     });
     if (p.final_weight_g != null) setWeight(p.final_weight_g);
-    if (p.duration_s != null) setElapsed(p.duration_s);
+    setElapsed(chart.pourTime());
     const peak = chart.peakFlow();
     setFlow(peak);
     showStats({ ...p, peak_flow_g_s: peak });
@@ -750,7 +779,8 @@ function renderHistory(items) {
   }
   historyList.innerHTML = items.map(it => {
     const when = formatWhen(it.saved_at) || it.file;
-    const dur = it.duration_s != null ? `${it.duration_s.toFixed(1)} s` : '—';
+    const dt = it.pour_time_s ?? it.duration_s;
+    const dur = dt != null ? `${dt.toFixed(1)} s` : '—';
     const wt = it.final_weight_g != null ? `${it.final_weight_g.toFixed(1)}<span class="u">g</span>` : '—';
     const flow = it.peak_flow_g_s != null ? `${it.peak_flow_g_s.toFixed(2)} g/s peak` : '';
     const tank = it.tank_pct_at_start != null ? `tank ${Math.round(it.tank_pct_at_start)}%` : '';
@@ -782,7 +812,7 @@ async function replayShot(file) {
       first_drop_at_ms: shot.first_drop_at_ms,
     });
     setWeight(shot.final_weight_g ?? 0);
-    setElapsed(shot.duration_s ?? 0);
+    setElapsed(chart.pourTime());
     const peak = chart.peakFlow();
     setFlow(peak);
     if (shot.tank_pct_at_start != null) tankV.textContent = Math.round(shot.tank_pct_at_start);
