@@ -39,6 +39,31 @@ FILENAME_TS_RE = re.compile(r"^(\d{8}T\d{6}Z)_")
 SCALE_BUFFER_SEC = 30.0
 PREPEND_LOOKBACK_SEC = 5.0
 
+# Tare-event filter — the firmware fires shot/start on weight delta,
+# so taring the scale (or fiddling with the cup) currently produces
+# bogus "shots" that return to zero with wild excursions in the curve.
+# Drop them at save time rather than poison the history view.
+MIN_FINAL_WEIGHT_G = 2.0
+WEIGHT_RANGE_G = (-5.0, 200.0)
+
+
+def looks_like_tare(record: dict) -> tuple[bool, str]:
+    """Return (is_tare, reason) for a shot record about to be saved."""
+    samples = record.get("samples") or []
+    if not samples:
+        return True, "no samples"
+    final = record.get("final_weight_g") or 0
+    if abs(final) < MIN_FINAL_WEIGHT_G:
+        return True, f"final_weight_g={final:.2f}g (below {MIN_FINAL_WEIGHT_G}g)"
+    lo, hi = WEIGHT_RANGE_G
+    for s in samples:
+        w = s.get("weight_g")
+        if w is None:
+            continue
+        if w < lo or w > hi:
+            return True, f"weight {w:.1f}g outside [{lo}, {hi}]g"
+    return False, ""
+
 # In-flight shots: shot_id -> {"start": dict|None, "samples": [dict], "prepend": [dict]}
 shots_in_flight: dict[str, dict] = defaultdict(
     lambda: {"start": None, "samples": [], "prepend": []}
@@ -157,6 +182,11 @@ def on_message(client, userdata, msg):
         record.setdefault("samples", buf["prepend"] + buf["samples"])
         if buf["start"] and "tank_pct_at_start" not in record:
             record["tank_pct_at_start"] = buf["start"].get("tank_pct_at_start")
+
+        is_tare, reason = looks_like_tare(record)
+        if is_tare:
+            print(f"dropped shot {shot_id}: {reason}", flush=True)
+            return
 
         ts = utc_iso()
         # Sanitise shot_id for the filename
