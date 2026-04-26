@@ -31,5 +31,6 @@ services:
     volumes:
       - ./web:/usr/share/caddy
       - ./web/Caddyfile:/etc/caddy/Caddyfile
+      - ./shots:/usr/share/caddy/shots:ro
     depends_on:
       - mosquitto

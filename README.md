@@ -3,8 +3,13 @@
 Home-server side of the espresso shot logger. Runs:
 
 - **Mosquitto** — MQTT broker on `1883` (TCP) and `9001` (WebSockets)
-- **shot-logger** — Python receiver that writes one JSON file per shot to `./shots/`
-- **web** — Caddy serving a Plotly live-graph dashboard on `8080`
+- **shot-logger** — Python receiver that buffers `coffee/shot/sample` between
+  start and end, writes one self-contained JSON file per shot to `./shots/`,
+  and maintains `shots/index.json` for the history view
+- **web** — Caddy serving a Plotly dashboard on `8080` with a **Live** tab
+  (live curve + numeric weight/elapsed/flow overlay + state badge + tank %)
+  and a **History** tab (click any past shot to replay on the same chart).
+  `./shots/` is mounted read-only into Caddy at `/shots/`.
 
 The ESP32 firmware that publishes to this broker lives in
 [richardross23/water-meter](https://github.com/richardross23/water-meter).
@@ -81,11 +86,15 @@ mosquitto/
   data/                       # persistence (auto-populated)
   log/                        # broker logs
 logger/
-  logger.py                   # subscribes to coffee/shot/end, writes JSON
+  logger.py                   # subscribes to coffee/shot/{start,sample,end},
+                              # buffers samples, writes self-contained JSON
+                              # + maintains index.json
 web/
   Caddyfile
-  index.html                  # Plotly dashboard, paho-mqtt over WS
+  index.html                  # Plotly dashboard + history/replay,
+                              # paho-mqtt over WS
 shots/                        # captured shots, one JSON file each
+  index.json                  # newest-first listing for the history view
 ```
 
 ## Operations
@@ -106,5 +115,11 @@ docker compose down                   # stop everything (data persists)
 - **Persistence** lives in `./mosquitto/data/` and `./shots/` — both are
   bind-mounted, so the data survives `docker compose down`.
 - **Live graph only redraws on `coffee/shot/start`** — open the page mid-shot
-  and you'll see nothing until the next shot begins. The `coffee/shot/end`
-  payload is self-contained for after-the-fact replay.
+  and you'll see nothing until the next shot begins. Use the **History** tab
+  to replay any saved shot on the same chart (samples are stored alongside
+  the summary so replay is offline).
+- **Old shot files have no `samples` array** — anything saved before the
+  buffering logger was added will replay as an empty curve with metadata only.
+  New shots are fully replayable.
+- **`coffee/water/pct` and `coffee/device/state` are retained** — the tank
+  widget and the offline badge populate immediately on page load.
