@@ -2,4 +2,7 @@
 	root * /usr/share/caddy
 	file_server
 	encode gzip
+
+	# Single-page dashboard with frequently-changing JSON — never cache.
+	header Cache-Control "no-store, must-revalidate"
 }
