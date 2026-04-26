@@ -2,143 +2,353 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<title>Espresso shot — live</title>
+<title>Espresso</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,100..900&family=Inter:wght@300;400;500;600&display=swap" rel="stylesheet">
 <script src="https://cdn.jsdelivr.net/npm/mqtt@5/dist/mqtt.min.js"></script>
-<script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
 <style>
   :root {
-    --bg: #111;
-    --panel: #1a1a1a;
-    --border: #2a2a2a;
-    --fg: #eee;
-    --dim: #888;
-    --accent: #6cf;
-    --accent2: #fc6;
-    --good: #6c6;
-    --bad: #c66;
-    --warn: #ec6;
+    --bg-0: #14100c;
+    --bg-1: #1c1612;
+    --bg-2: #241c16;
+    --line: #2e2520;
+    --line-bright: #44372d;
+    --fg: #f4ead9;
+    --fg-2: #c8b9a1;
+    --dim: #7a6a58;
+    --copper: #d4915c;
+    --copper-bright: #ecaa72;
+    --cream: #f0d9a8;
+    --good: #8fbc7a;
+    --bad: #d4715c;
+    --warn: #e8b260;
   }
-  html, body { margin: 0; height: 100%; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: var(--bg-0); }
   body {
-    font-family: -apple-system, system-ui, "Helvetica Neue", sans-serif;
-    background: var(--bg); color: var(--fg);
+    font-family: 'Inter', -apple-system, system-ui, sans-serif;
+    color: var(--fg); font-weight: 400;
     display: grid; grid-template-rows: auto 1fr;
+    background:
+      radial-gradient(ellipse 80% 60% at 50% 0%, #2a1c12 0%, transparent 70%),
+      var(--bg-0);
   }
+
+  /* ---------- header ---------- */
   header {
-    display: flex; align-items: center; gap: 14px;
-    padding: 10px 16px; border-bottom: 1px solid var(--border);
+    display: flex; align-items: center; gap: 18px;
+    padding: 14px 24px; border-bottom: 1px solid var(--line);
+    background: rgba(20, 16, 12, 0.7); backdrop-filter: blur(8px);
   }
-  h1 { margin: 0; font-size: 16px; font-weight: 500; }
-  .tabs { display: flex; gap: 4px; }
+  .logo {
+    font-family: 'Fraunces', serif; font-weight: 400; font-size: 18px;
+    letter-spacing: 0.02em; font-style: italic;
+    color: var(--copper-bright);
+  }
+  .tabs { display: flex; gap: 2px; }
   .tab {
-    border: 1px solid var(--border); background: var(--panel); color: var(--dim);
-    font: inherit; font-size: 13px; padding: 4px 12px; border-radius: 4px; cursor: pointer;
+    background: none; border: none; color: var(--dim);
+    font: 500 12px/1 'Inter', sans-serif;
+    letter-spacing: 0.08em; text-transform: uppercase;
+    padding: 6px 12px; cursor: pointer; border-radius: 4px;
+    transition: color 0.15s, background 0.15s;
   }
-  .tab.active { color: var(--fg); border-color: var(--accent); }
+  .tab:hover { color: var(--fg-2); }
+  .tab.active { color: var(--copper-bright); background: rgba(212, 145, 92, 0.08); }
+
   .badge {
-    font-size: 11px; padding: 2px 8px; border-radius: 10px;
-    border: 1px solid var(--border); color: var(--dim);
-    text-transform: uppercase; letter-spacing: 0.5px;
+    font: 500 10px/1 'Inter', sans-serif;
+    letter-spacing: 0.12em; text-transform: uppercase;
+    padding: 5px 10px; border-radius: 999px;
+    border: 1px solid var(--line-bright); color: var(--dim);
+    transition: all 0.25s ease;
+    display: inline-flex; align-items: center; gap: 6px;
+  }
+  .badge::before {
+    content: ''; width: 6px; height: 6px; border-radius: 50%;
+    background: currentColor; opacity: 0.7;
   }
   .badge.idle { color: var(--dim); }
-  .badge.extracting { color: var(--bg); background: var(--accent); border-color: var(--accent); }
-  .badge.done { color: var(--bg); background: var(--good); border-color: var(--good); }
-  .badge.replay { color: var(--bg); background: var(--warn); border-color: var(--warn); }
-  .badge.offline { color: var(--bg); background: var(--bad); border-color: var(--bad); }
-  #status { margin-left: auto; font-size: 12px; color: var(--dim); }
+  .badge.extracting {
+    color: var(--copper-bright); border-color: var(--copper);
+    background: rgba(212, 145, 92, 0.08);
+  }
+  .badge.extracting::before { animation: pulse 1.2s ease-in-out infinite; }
+  .badge.done { color: var(--good); border-color: var(--good); background: rgba(143, 188, 122, 0.08); }
+  .badge.replay { color: var(--warn); border-color: var(--warn); background: rgba(232, 178, 96, 0.08); }
+  .badge.offline { color: var(--bad); border-color: var(--bad); background: rgba(212, 113, 92, 0.08); }
+  @keyframes pulse {
+    0%, 100% { opacity: 0.4; transform: scale(1); }
+    50% { opacity: 1; transform: scale(1.3); }
+  }
+
+  #status { margin-left: auto; font-size: 11px; color: var(--dim); letter-spacing: 0.04em; }
   #status.connected { color: var(--good); }
   #status.error { color: var(--bad); }
 
-  main { position: relative; min-height: 0; }
-  #chart-pane { position: relative; width: 100%; height: 100%; min-width: 0; min-height: 0; }
-  #g { width: 100%; height: 100%; }
+  /* ---------- main canvas ---------- */
+  main { position: relative; min-height: 0; overflow: hidden; }
+  #stage { position: relative; width: 100%; height: 100%; padding: 28px 36px; }
 
-  #overlay {
-    position: absolute; top: 56px; left: 24px; pointer-events: none;
-    display: flex; flex-direction: column; gap: 4px;
-    text-shadow: 0 0 10px rgba(0,0,0,0.8);
+  /* hero readout — big number floating top-left */
+  #hero {
+    position: absolute; top: 28px; left: 36px; z-index: 5;
+    pointer-events: none;
+    transition: opacity 0.3s;
   }
-  #weight { font-size: 64px; font-weight: 200; line-height: 1; font-variant-numeric: tabular-nums; }
-  #weight .unit { font-size: 24px; color: var(--dim); margin-left: 4px; }
-  #elapsed { font-size: 18px; color: var(--dim); font-variant-numeric: tabular-nums; }
-  #flow { font-size: 14px; color: var(--accent2); font-variant-numeric: tabular-nums; margin-top: 2px; }
-  #endsummary {
-    margin-top: 8px; font-size: 13px; color: var(--dim); max-width: 360px; line-height: 1.5;
+  #weight {
+    font-family: 'Fraunces', serif;
+    font-variation-settings: "opsz" 144, "SOFT" 30;
+    font-weight: 200; font-size: 144px; line-height: 0.85;
+    color: var(--cream); letter-spacing: -0.04em;
+    font-variant-numeric: tabular-nums;
+    text-shadow: 0 0 60px rgba(212, 145, 92, 0.18);
+    display: flex; align-items: baseline; gap: 8px;
+  }
+  #weight .v { display: inline-block; }
+  #weight .unit {
+    font-size: 32px; color: var(--dim); font-weight: 300;
+    font-style: italic; letter-spacing: 0;
+  }
+  #subhero {
+    margin-top: 10px;
+    display: flex; align-items: baseline; gap: 18px;
+    color: var(--fg-2); font-size: 13px;
+    letter-spacing: 0.06em; text-transform: uppercase;
+  }
+  #subhero .label { color: var(--dim); margin-right: 6px; }
+  #elapsed-v, #flow-v { font-variant-numeric: tabular-nums; color: var(--copper-bright); font-weight: 500; }
+
+  /* tank widget — small, top-right */
+  #tank-widget {
+    position: absolute; top: 28px; right: 36px; z-index: 5;
+    text-align: right; pointer-events: none;
+  }
+  #tank-widget .label {
+    font-size: 10px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--dim);
+  }
+  #tank-widget .v {
+    font-family: 'Fraunces', serif; font-weight: 300;
+    font-size: 36px; color: var(--fg-2); font-variant-numeric: tabular-nums;
+    letter-spacing: -0.02em;
+  }
+  #tank-widget .v::after { content: '%'; font-size: 18px; color: var(--dim); margin-left: 2px; }
+
+  /* chart */
+  #chart-wrap {
+    position: absolute; left: 0; right: 0; bottom: 0; top: 0;
+    pointer-events: none;
+  }
+  #chart {
+    position: absolute; left: 0; right: 0; bottom: 0;
+    width: 100%; height: 60%;
+    display: block;
+    pointer-events: auto;
+    cursor: crosshair;
   }
 
-  #widgets {
-    position: absolute; top: 16px; right: 24px; pointer-events: none;
-    display: flex; flex-direction: column; align-items: flex-end; gap: 6px;
-    text-shadow: 0 0 10px rgba(0,0,0,0.8);
+  /* hover tooltip */
+  #tooltip {
+    position: absolute; pointer-events: none; z-index: 20;
+    padding: 10px 14px; min-width: 130px;
+    background: rgba(28, 22, 18, 0.92); backdrop-filter: blur(8px);
+    border: 1px solid var(--line-bright); border-radius: 6px;
+    font-size: 12px; color: var(--fg-2);
+    opacity: 0; transition: opacity 0.12s;
+    box-shadow: 0 8px 32px rgba(0,0,0,0.4);
   }
-  .widget { font-size: 13px; color: var(--dim); }
-  .widget .v { color: var(--fg); font-variant-numeric: tabular-nums; }
+  #tooltip.visible { opacity: 1; }
+  #tooltip .row { display: flex; justify-content: space-between; gap: 14px; line-height: 1.6; }
+  #tooltip .k { color: var(--dim); letter-spacing: 0.06em; text-transform: uppercase; font-size: 10px; }
+  #tooltip .v { font-variant-numeric: tabular-nums; font-weight: 500; }
+  #tooltip .v.weight { color: var(--copper-bright); }
+  #tooltip .v.flow { color: var(--cream); }
+  #tooltip .v.t { color: var(--fg); }
 
+  /* receipt card — shot end summary */
+  #receipt {
+    position: absolute; bottom: 28px; left: 36px; z-index: 6;
+    background: linear-gradient(180deg, rgba(36, 28, 22, 0.85), rgba(28, 22, 18, 0.95));
+    backdrop-filter: blur(10px);
+    border: 1px solid var(--line-bright); border-radius: 8px;
+    padding: 16px 22px; min-width: 320px;
+    box-shadow: 0 12px 40px rgba(0,0,0,0.5);
+    transform: translateY(20px); opacity: 0; pointer-events: none;
+    transition: transform 0.4s cubic-bezier(0.2, 0.9, 0.3, 1.2), opacity 0.3s;
+  }
+  #receipt.visible { transform: translateY(0); opacity: 1; pointer-events: auto; }
+  #receipt .head {
+    display: flex; justify-content: space-between; align-items: baseline;
+    margin-bottom: 12px;
+  }
+  #receipt .head .title {
+    font-family: 'Fraunces', serif; font-style: italic; font-weight: 400;
+    font-size: 13px; color: var(--copper-bright); letter-spacing: 0.04em;
+  }
+  #receipt .head .close {
+    background: none; border: none; color: var(--dim); cursor: pointer;
+    font-size: 18px; line-height: 1; padding: 0; transition: color 0.15s;
+  }
+  #receipt .head .close:hover { color: var(--fg); }
+  #receipt .stats {
+    display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px;
+  }
+  #receipt .stat .label {
+    font-size: 9px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--dim);
+    margin-bottom: 4px;
+  }
+  #receipt .stat .value {
+    font-family: 'Fraunces', serif; font-weight: 300;
+    font-size: 26px; color: var(--cream); font-variant-numeric: tabular-nums;
+    letter-spacing: -0.02em; line-height: 1;
+  }
+  #receipt .stat .value .u { font-size: 12px; color: var(--dim); margin-left: 2px; font-style: italic; }
+
+  /* ---------- history panel ---------- */
   #history {
-    position: fixed; right: 0; top: 49px; bottom: 0; width: 320px;
-    border-left: 1px solid var(--border); background: var(--panel);
+    position: fixed; right: 0; top: 53px; bottom: 0; width: 340px;
+    border-left: 1px solid var(--line-bright);
+    background: linear-gradient(180deg, var(--bg-1), var(--bg-0));
     overflow-y: auto;
     transform: translateX(100%);
-    transition: transform 0.18s ease-out;
-    z-index: 10;
-    box-shadow: -8px 0 24px rgba(0,0,0,0.4);
+    transition: transform 0.25s cubic-bezier(0.3, 0.9, 0.4, 1.0);
+    z-index: 30;
+    box-shadow: -16px 0 48px rgba(0,0,0,0.5);
   }
   main.history-open #history { transform: translateX(0); }
   #history-header {
-    padding: 10px 14px; font-size: 12px; color: var(--dim);
-    text-transform: uppercase; letter-spacing: 0.5px; border-bottom: 1px solid var(--border);
+    padding: 14px 18px; font-size: 10px; color: var(--dim);
+    text-transform: uppercase; letter-spacing: 0.14em;
+    border-bottom: 1px solid var(--line);
     display: flex; justify-content: space-between; align-items: center;
+    position: sticky; top: 0; background: var(--bg-1); z-index: 1;
   }
-  #history-header .actions { display: flex; gap: 6px; align-items: center; }
+  #history-header .actions { display: flex; gap: 8px; align-items: center; }
   #history-header button {
-    background: none; border: 1px solid var(--border); color: var(--dim);
-    font: inherit; font-size: 11px; padding: 2px 8px; border-radius: 3px; cursor: pointer;
+    background: none; border: 1px solid var(--line-bright); color: var(--fg-2);
+    font: 500 10px/1 'Inter', sans-serif; letter-spacing: 0.1em; text-transform: uppercase;
+    padding: 5px 10px; border-radius: 3px; cursor: pointer;
+    transition: all 0.15s;
   }
-  #history-header button:hover { color: var(--fg); border-color: var(--fg); }
-  #close-history { font-size: 16px; line-height: 1; padding: 0 8px; }
+  #history-header button:hover { color: var(--copper-bright); border-color: var(--copper); }
+  #close-history {
+    font-size: 18px !important; padding: 2px 9px !important;
+    letter-spacing: 0 !important; line-height: 1 !important;
+  }
+
   .row {
-    padding: 10px 14px; border-bottom: 1px solid var(--border); cursor: pointer;
-    display: grid; grid-template-columns: 1fr auto; gap: 2px 10px;
-    font-size: 13px;
+    padding: 14px 18px; border-bottom: 1px solid var(--line); cursor: pointer;
+    transition: background 0.12s;
+    display: grid; gap: 4px;
   }
-  .row:hover { background: #222; }
-  .row.selected { background: #1f2a35; }
-  .row .when { color: var(--dim); font-size: 11px; grid-column: 1 / -1; }
-  .row .stats { color: var(--dim); font-size: 11px; }
-  .row .weight-val { color: var(--accent); font-variant-numeric: tabular-nums; }
-  #history-empty { padding: 20px; color: var(--dim); font-size: 13px; text-align: center; }
+  .row:hover { background: rgba(212, 145, 92, 0.05); }
+  .row.selected {
+    background: rgba(212, 145, 92, 0.08);
+    border-left: 2px solid var(--copper);
+    padding-left: 16px;
+  }
+  .row .when {
+    font-size: 10px; color: var(--dim); letter-spacing: 0.06em; text-transform: uppercase;
+  }
+  .row .top {
+    display: flex; justify-content: space-between; align-items: baseline; margin-top: 2px;
+  }
+  .row .weight-val {
+    font-family: 'Fraunces', serif; font-weight: 300; font-size: 22px;
+    color: var(--cream); font-variant-numeric: tabular-nums; letter-spacing: -0.02em;
+  }
+  .row .weight-val .u { font-size: 11px; color: var(--dim); font-style: italic; margin-left: 1px; }
+  .row .duration { font-size: 11px; color: var(--fg-2); font-variant-numeric: tabular-nums; }
+  .row .meta { font-size: 10px; color: var(--dim); letter-spacing: 0.04em; }
+  #history-empty { padding: 40px 18px; color: var(--dim); font-size: 12px; text-align: center; font-style: italic; }
 </style>
 </head>
 <body>
+
 <header>
-  <h1>Espresso shot</h1>
+  <span class="logo">Espresso</span>
   <div class="tabs">
     <button class="tab active" data-mode="live">Live</button>
     <button class="tab" data-mode="history">History</button>
   </div>
-  <span class="badge idle" id="state-badge">IDLE</span>
-  <span class="badge offline" id="device-badge" style="display:none">DEVICE OFFLINE</span>
-  <span id="status">connecting…</span>
+  <span class="badge idle" id="state-badge">Idle</span>
+  <span class="badge offline" id="device-badge" style="display:none">Device offline</span>
+  <span id="status">connecting</span>
 </header>
+
 <main id="main">
-  <div id="chart-pane">
-    <div id="g"></div>
-    <div id="overlay">
-      <div id="weight" style="display:none"><span class="v">0.0</span><span class="unit">g</span></div>
-      <div id="elapsed" style="display:none">0.0 s</div>
-      <div id="flow" style="display:none">0.0 g/s</div>
-      <div id="endsummary" style="display:none"></div>
+  <div id="stage">
+    <div id="hero">
+      <div id="weight"><span class="v">—</span><span class="unit">g</span></div>
+      <div id="subhero">
+        <div><span class="label">elapsed</span><span id="elapsed-v">0.0s</span></div>
+        <div><span class="label">flow</span><span id="flow-v">0.00 g/s</span></div>
+      </div>
     </div>
-    <div id="widgets">
-      <div class="widget">tank <span class="v" id="tank-v">—</span>%</div>
+
+    <div id="tank-widget">
+      <div class="label">Tank</div>
+      <div class="v" id="tank-v">—</div>
+    </div>
+
+    <div id="chart-wrap">
+      <svg id="chart" preserveAspectRatio="none">
+        <defs>
+          <linearGradient id="weight-grad" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stop-color="#d4915c" stop-opacity="0.5"/>
+            <stop offset="100%" stop-color="#d4915c" stop-opacity="0"/>
+          </linearGradient>
+          <filter id="glow" x="-30%" y="-30%" width="160%" height="160%">
+            <feGaussianBlur stdDeviation="2.5" result="b1"/>
+            <feGaussianBlur stdDeviation="6" result="b2"/>
+            <feMerge>
+              <feMergeNode in="b2"/>
+              <feMergeNode in="b1"/>
+              <feMergeNode in="SourceGraphic"/>
+            </feMerge>
+          </filter>
+          <pattern id="grid" width="60" height="40" patternUnits="userSpaceOnUse">
+            <path d="M 60 0 L 0 0 0 40" fill="none" stroke="#241c16" stroke-width="1"/>
+          </pattern>
+        </defs>
+        <rect class="grid-bg" width="100%" height="100%" fill="url(#grid)" opacity="0.5"/>
+        <rect class="preinfusion-band" fill="rgba(212, 145, 92, 0.06)" stroke="rgba(212, 145, 92, 0.18)" stroke-dasharray="2 4" stroke-width="1" x="0" y="0" width="0" height="100%"/>
+        <line class="first-drop" stroke="var(--copper)" stroke-width="1" stroke-dasharray="3 3" opacity="0" x1="0" x2="0" y1="0" y2="100%"/>
+        <path class="weight-fill" fill="url(#weight-grad)" d=""/>
+        <path class="flow-curve" fill="none" stroke="var(--cream)" stroke-width="1.5" stroke-linejoin="round" stroke-linecap="round" opacity="0.55" d=""/>
+        <path class="weight-curve" fill="none" stroke="var(--copper-bright)" stroke-width="2.2" stroke-linejoin="round" stroke-linecap="round" filter="url(#glow)" d=""/>
+        <line class="cursor" stroke="var(--fg-2)" stroke-width="1" stroke-dasharray="2 3" opacity="0" x1="0" x2="0" y1="0" y2="100%"/>
+        <circle class="cursor-dot weight" r="4" fill="var(--copper-bright)" opacity="0" filter="url(#glow)"/>
+        <circle class="cursor-dot flow" r="3" fill="var(--cream)" opacity="0"/>
+      </svg>
+      <div id="tooltip">
+        <div class="row"><span class="k">t</span><span class="v t" id="tt-t">—</span></div>
+        <div class="row"><span class="k">weight</span><span class="v weight" id="tt-w">—</span></div>
+        <div class="row"><span class="k">flow</span><span class="v flow" id="tt-f">—</span></div>
+      </div>
+    </div>
+
+    <div id="receipt">
+      <div class="head">
+        <span class="title">Shot complete</span>
+        <button class="close" id="receipt-close" aria-label="Dismiss">×</button>
+      </div>
+      <div class="stats">
+        <div class="stat"><div class="label">Yield</div><div class="value"><span id="r-yield">—</span><span class="u">g</span></div></div>
+        <div class="stat"><div class="label">Time</div><div class="value"><span id="r-time">—</span><span class="u">s</span></div></div>
+        <div class="stat"><div class="label">Preinfusion</div><div class="value"><span id="r-pre">—</span><span class="u">s</span></div></div>
+        <div class="stat"><div class="label">Peak flow</div><div class="value"><span id="r-peak">—</span><span class="u">g/s</span></div></div>
+      </div>
     </div>
   </div>
+
   <aside id="history">
     <div id="history-header">
       <span>Recent shots</span>
       <div class="actions">
         <button id="back-to-live" title="Resume live updates">Live</button>
-        <button id="close-history" title="Hide panel (keep current view)" aria-label="Close">×</button>
+        <button id="close-history" title="Hide panel" aria-label="Close">×</button>
       </div>
     </div>
     <div id="history-list"></div>
@@ -151,87 +361,236 @@ const statusEl = $('status');
 const stateBadge = $('state-badge');
 const deviceBadge = $('device-badge');
 const tankV = $('tank-v');
-const weightEl = $('weight');
-const weightV = weightEl.querySelector('.v');
-const elapsedEl = $('elapsed');
-const flowEl = $('flow');
-const endSummaryEl = $('endsummary');
+const weightV = document.querySelector('#weight .v');
+const elapsedV = $('elapsed-v');
+const flowV = $('flow-v');
 const mainEl = $('main');
 const historyList = $('history-list');
+const heroEl = $('hero');
+const receiptEl = $('receipt');
+const tooltip = $('tooltip');
 
-// "live" — drawing live samples; "replay" — pinned to a historic shot
 let mode = 'live';
 let activeShotId = null;
 let selectedFile = null;
 
-const layout = {
-  paper_bgcolor: '#111',
-  plot_bgcolor: '#111',
-  font: { color: '#ccc' },
-  margin: { l: 50, r: 60, t: 20, b: 40 },
-  xaxis: { title: 'Seconds since pump-on', gridcolor: '#222', zerolinecolor: '#333' },
-  yaxis: { title: 'Weight (g)', gridcolor: '#222', zerolinecolor: '#333' },
-  yaxis2: { title: 'Flow (g/s)', overlaying: 'y', side: 'right', gridcolor: '#222' },
-  showlegend: true,
-  legend: { x: 0, y: 1.05, orientation: 'h' },
-};
+// ---------- weight tween ----------
+let displayedWeight = 0;
+let targetWeight = 0;
+let tweenRaf = null;
+function setWeight(w) {
+  if (!Number.isFinite(w)) { weightV.textContent = '—'; return; }
+  targetWeight = w;
+  if (!tweenRaf) tween();
+}
+function tween() {
+  const d = targetWeight - displayedWeight;
+  displayedWeight += d * 0.28;
+  if (Math.abs(d) < 0.02 || !Number.isFinite(displayedWeight)) {
+    displayedWeight = Number.isFinite(targetWeight) ? targetWeight : 0;
+    tweenRaf = null;
+  } else {
+    tweenRaf = requestAnimationFrame(tween);
+  }
+  weightV.textContent = displayedWeight.toFixed(1);
+}
 
-Plotly.newPlot('g', [
-  { x: [], y: [], name: 'Weight (g)', mode: 'lines', line: { color: '#6cf', width: 2 } },
-  { x: [], y: [], name: 'Flow (g/s)', yaxis: 'y2', mode: 'lines', line: { color: '#fc6', width: 2 } },
-], layout, { responsive: true, displayModeBar: false });
+// ---------- chart ----------
+class ShotChart {
+  constructor(svg) {
+    this.svg = svg;
+    this.samples = [];
+    this.meta = {};
+    this.pad = { l: 30, r: 30, t: 30, b: 30 };
+    this.fixedMaxT = 32;   // seconds — chart shows 0..max(this, dataMax)
+    this.fixedMaxW = 50;   // grams
+    this.fixedMaxF = 3.5;  // g/s
 
-window.addEventListener('resize', () => Plotly.Plots.resize('g'));
+    this.bg = svg.querySelector('.grid-bg');
+    this.preBand = svg.querySelector('.preinfusion-band');
+    this.firstDrop = svg.querySelector('.first-drop');
+    this.weightFill = svg.querySelector('.weight-fill');
+    this.weightCurve = svg.querySelector('.weight-curve');
+    this.flowCurve = svg.querySelector('.flow-curve');
+    this.cursorLine = svg.querySelector('.cursor');
+    this.cursorDotW = svg.querySelector('.cursor-dot.weight');
+    this.cursorDotF = svg.querySelector('.cursor-dot.flow');
 
+    this.resize();
+    new ResizeObserver(() => { this.resize(); this.render(); }).observe(svg);
+    svg.addEventListener('mousemove', (e) => this.onHover(e));
+    svg.addEventListener('mouseleave', () => this.hideTooltip());
+  }
+
+  resize() {
+    const r = this.svg.getBoundingClientRect();
+    this.W = r.width;
+    this.H = r.height;
+    this.svg.setAttribute('viewBox', `0 0 ${this.W} ${this.H}`);
+  }
+
+  // Data → SVG pixel coords
+  xScale(t) {
+    const maxT = Math.max(this.fixedMaxT, this.samples.length ? this.samples.at(-1).t : 0);
+    return this.pad.l + (t / maxT) * (this.W - this.pad.l - this.pad.r);
+  }
+  yScaleW(w) {
+    const maxW = Math.max(this.fixedMaxW, ...this.samples.map(s => s.w || 0));
+    return this.H - this.pad.b - (w / maxW) * (this.H - this.pad.t - this.pad.b);
+  }
+  yScaleF(f) {
+    const maxF = Math.max(this.fixedMaxF, ...this.samples.map(s => s.f || 0));
+    return this.H - this.pad.b - (f / maxF) * (this.H - this.pad.t - this.pad.b);
+  }
+
+  setShot(samples, meta) {
+    this.samples = (samples || []).filter(s => Number.isFinite(s.t) && Number.isFinite(s.w));
+    this.meta = meta || {};
+    this.render();
+  }
+  appendSample(s) {
+    if (!Number.isFinite(s.t) || !Number.isFinite(s.w)) return;
+    this.samples.push(s);
+    this.render();
+  }
+  setMeta(meta) { Object.assign(this.meta, meta); this.render(); }
+  reset() { this.samples = []; this.meta = {}; this.render(); }
+
+  render() {
+    if (!this.samples.length) {
+      this.weightCurve.setAttribute('d', '');
+      this.flowCurve.setAttribute('d', '');
+      this.weightFill.setAttribute('d', '');
+      this.preBand.setAttribute('width', 0);
+      this.firstDrop.setAttribute('opacity', 0);
+      return;
+    }
+
+    // weight curve
+    let dW = '', dF = '';
+    this.samples.forEach((s, i) => {
+      const x = this.xScale(s.t);
+      const yw = this.yScaleW(s.w);
+      const yf = this.yScaleF(s.f ?? 0);
+      dW += (i === 0 ? 'M' : 'L') + x.toFixed(1) + ' ' + yw.toFixed(1) + ' ';
+      dF += (i === 0 ? 'M' : 'L') + x.toFixed(1) + ' ' + yf.toFixed(1) + ' ';
+    });
+    this.weightCurve.setAttribute('d', dW);
+    this.flowCurve.setAttribute('d', dF);
+
+    // weight fill (close to baseline)
+    const x0 = this.xScale(this.samples[0].t);
+    const xN = this.xScale(this.samples.at(-1).t);
+    const yBase = this.H - this.pad.b;
+    this.weightFill.setAttribute('d', `M${x0} ${yBase} ` + dW.slice(1) + `L${xN} ${yBase} Z`);
+
+    // preinfusion band: 0 to first_drop_at_ms (or preinfusion_s)
+    const preEnd = this.meta.first_drop_at_ms != null
+      ? this.meta.first_drop_at_ms / 1000
+      : (this.meta.preinfusion_s ?? null);
+    if (preEnd && preEnd > 0) {
+      const px0 = this.xScale(0);
+      const px1 = this.xScale(preEnd);
+      this.preBand.setAttribute('x', px0);
+      this.preBand.setAttribute('width', Math.max(0, px1 - px0));
+      this.preBand.setAttribute('y', this.pad.t);
+      this.preBand.setAttribute('height', this.H - this.pad.t - this.pad.b);
+      this.firstDrop.setAttribute('x1', px1);
+      this.firstDrop.setAttribute('x2', px1);
+      this.firstDrop.setAttribute('y1', this.pad.t);
+      this.firstDrop.setAttribute('y2', this.H - this.pad.b);
+      this.firstDrop.setAttribute('opacity', 0.55);
+    } else {
+      this.preBand.setAttribute('width', 0);
+      this.firstDrop.setAttribute('opacity', 0);
+    }
+  }
+
+  onHover(e) {
+    if (!this.samples.length) return;
+    const r = this.svg.getBoundingClientRect();
+    const px = e.clientX - r.left;
+    const dataX = this.invertX(px);
+    // find nearest sample
+    let nearest = this.samples[0], best = Infinity;
+    for (const s of this.samples) {
+      const d = Math.abs(s.t - dataX);
+      if (d < best) { best = d; nearest = s; }
+    }
+    const sx = this.xScale(nearest.t);
+    const sy = this.yScaleW(nearest.w);
+    const sf = this.yScaleF(nearest.f ?? 0);
+
+    this.cursorLine.setAttribute('x1', sx);
+    this.cursorLine.setAttribute('x2', sx);
+    this.cursorLine.setAttribute('y1', this.pad.t);
+    this.cursorLine.setAttribute('y2', this.H - this.pad.b);
+    this.cursorLine.setAttribute('opacity', 0.55);
+
+    this.cursorDotW.setAttribute('cx', sx);
+    this.cursorDotW.setAttribute('cy', sy);
+    this.cursorDotW.setAttribute('opacity', 1);
+    this.cursorDotF.setAttribute('cx', sx);
+    this.cursorDotF.setAttribute('cy', sf);
+    this.cursorDotF.setAttribute('opacity', 1);
+
+    $('tt-t').textContent = nearest.t.toFixed(1) + ' s';
+    $('tt-w').textContent = (nearest.w ?? 0).toFixed(1) + ' g';
+    $('tt-f').textContent = (nearest.f ?? 0).toFixed(2) + ' g/s';
+    tooltip.classList.add('visible');
+    // position near cursor, but flip if near right edge
+    const tw = tooltip.offsetWidth || 160;
+    const wrapR = $('chart-wrap').getBoundingClientRect();
+    const left = (e.clientX - wrapR.left) + 14;
+    const right = wrapR.width - left - tw;
+    tooltip.style.left = (right < 0 ? (e.clientX - wrapR.left - tw - 14) : left) + 'px';
+    tooltip.style.top = Math.max(8, e.clientY - wrapR.top - 60) + 'px';
+  }
+
+  invertX(px) {
+    const maxT = Math.max(this.fixedMaxT, this.samples.length ? this.samples.at(-1).t : 0);
+    return ((px - this.pad.l) / (this.W - this.pad.l - this.pad.r)) * maxT;
+  }
+
+  hideTooltip() {
+    tooltip.classList.remove('visible');
+    this.cursorLine.setAttribute('opacity', 0);
+    this.cursorDotW.setAttribute('opacity', 0);
+    this.cursorDotF.setAttribute('opacity', 0);
+  }
+}
+
+const chart = new ShotChart($('chart'));
+
+// ---------- badge ----------
 function setBadge(text, cls) {
   stateBadge.textContent = text;
   stateBadge.className = `badge ${cls}`;
 }
 
-function clearChart() {
-  Plotly.restyle('g', { x: [[], []], y: [[], []] }, [0, 1]);
+// ---------- receipt ----------
+function showReceipt(p) {
+  $('r-yield').textContent = p.final_weight_g != null ? p.final_weight_g.toFixed(1) : '—';
+  $('r-time').textContent = p.duration_s != null ? p.duration_s.toFixed(1) : '—';
+  $('r-pre').textContent = p.preinfusion_s != null ? p.preinfusion_s.toFixed(1) : '—';
+  $('r-peak').textContent = p.peak_flow_g_s != null ? p.peak_flow_g_s.toFixed(2) : '—';
+  receiptEl.classList.add('visible');
 }
+function hideReceipt() { receiptEl.classList.remove('visible'); }
+$('receipt-close').addEventListener('click', hideReceipt);
 
-function showOverlay({ weight, elapsed, flow }) {
-  weightEl.style.display = '';
-  elapsedEl.style.display = '';
-  flowEl.style.display = '';
-  weightV.textContent = (weight ?? 0).toFixed(1);
-  elapsedEl.textContent = `${(elapsed ?? 0).toFixed(1)} s`;
-  flowEl.textContent = `${(flow ?? 0).toFixed(2)} g/s`;
-}
+// ---------- subhero values ----------
+function setElapsed(s) { elapsedV.textContent = (Number.isFinite(s) ? s : 0).toFixed(1) + 's'; }
+function setFlow(f) { flowV.textContent = (Number.isFinite(f) ? f : 0).toFixed(2) + ' g/s'; }
 
-function hideOverlay() {
-  weightEl.style.display = 'none';
-  elapsedEl.style.display = 'none';
-  flowEl.style.display = 'none';
-}
-
-function showEndSummary(p) {
-  endSummaryEl.style.display = '';
-  const parts = [
-    p.final_weight_g != null ? `${p.final_weight_g}g` : null,
-    p.duration_s != null ? `in ${p.duration_s}s` : null,
-    p.preinfusion_s != null ? `(preinfusion ${p.preinfusion_s}s)` : null,
-    p.peak_flow_g_s != null ? `peak ${p.peak_flow_g_s} g/s` : null,
-  ].filter(Boolean);
-  endSummaryEl.textContent = parts.join(' · ');
-}
-
-function hideEndSummary() {
-  endSummaryEl.style.display = 'none';
-  endSummaryEl.textContent = '';
-}
-
-// --- MQTT ---
+// ---------- MQTT ----------
 const wsUrl = `ws://${window.location.hostname}:9001`;
 const client = mqtt.connect(wsUrl, {
   clientId: 'web-' + Math.random().toString(16).slice(2, 10),
   reconnectPeriod: 2000,
 });
-
 client.on('connect', () => {
-  statusEl.textContent = `connected ${wsUrl}`;
+  statusEl.textContent = 'connected';
   statusEl.className = 'connected';
   client.subscribe([
     'coffee/shot/start', 'coffee/shot/sample', 'coffee/shot/end',
@@ -239,12 +598,11 @@ client.on('connect', () => {
   ]);
 });
 client.on('error', (err) => { statusEl.textContent = `error: ${err.message}`; statusEl.className = 'error'; });
-client.on('reconnect', () => { statusEl.textContent = 'reconnecting…'; statusEl.className = ''; });
+client.on('reconnect', () => { statusEl.textContent = 'reconnecting'; statusEl.className = ''; });
 
 client.on('message', (topic, msg) => {
   const text = msg.toString();
-  let p;
-  try { p = JSON.parse(text); } catch { p = text; }
+  let p; try { p = JSON.parse(text); } catch { p = text; }
 
   if (topic === 'coffee/water/pct') {
     const n = parseFloat(text);
@@ -255,68 +613,69 @@ client.on('message', (topic, msg) => {
     deviceBadge.style.display = (text === 'online') ? 'none' : '';
     return;
   }
-
-  // Shot topics — ignore live data while pinned to a historic shot
   if (mode === 'replay') return;
 
   if (topic === 'coffee/shot/start') {
     activeShotId = p.shot_id;
-    clearChart();
-    hideEndSummary();
-    showOverlay({ weight: 0, elapsed: 0, flow: 0 });
-    setBadge('EXTRACTING', 'extracting');
+    chart.reset();
+    hideReceipt();
+    setBadge('Extracting', 'extracting');
+    displayedWeight = 0; setWeight(0);
+    setElapsed(0); setFlow(0);
     if (p.tank_pct_at_start != null) tankV.textContent = Math.round(p.tank_pct_at_start);
   } else if (topic === 'coffee/shot/sample') {
     if (activeShotId == null) {
       activeShotId = p.shot_id;
-      setBadge('EXTRACTING', 'extracting');
+      setBadge('Extracting', 'extracting');
     }
     const t = (p.t_ms ?? 0) / 1000;
-    Plotly.extendTraces('g', { x: [[t], [t]], y: [[p.weight_g], [p.flow_g_s]] }, [0, 1]);
-    showOverlay({ weight: p.weight_g, elapsed: t, flow: p.flow_g_s });
+    chart.appendSample({ t, w: p.weight_g, f: p.flow_g_s });
+    setWeight(p.weight_g ?? 0);
+    setElapsed(t);
+    setFlow(p.flow_g_s);
   } else if (topic === 'coffee/shot/end') {
     activeShotId = null;
-    setBadge('DONE', 'done');
-    showEndSummary(p);
-    if (p.final_weight_g != null) weightV.textContent = p.final_weight_g.toFixed(1);
-    if (p.duration_s != null) elapsedEl.textContent = `${p.duration_s.toFixed(1)} s`;
-    flowEl.style.display = 'none';
-    // Refresh the history list so the new shot shows up
+    setBadge('Done', 'done');
+    chart.setMeta({
+      preinfusion_s: p.preinfusion_s,
+      first_drop_at_ms: p.first_drop_at_ms,
+    });
+    if (p.final_weight_g != null) setWeight(p.final_weight_g);
+    if (p.duration_s != null) setElapsed(p.duration_s);
+    setFlow(p.peak_flow_g_s ?? 0);
+    showReceipt(p);
     loadHistory();
   }
 });
 
-// --- History tab + replay ---
+// ---------- history ----------
 async function loadHistory() {
   try {
     const r = await fetch('/shots/index.json', { cache: 'no-store' });
     if (!r.ok) throw new Error(`HTTP ${r.status}`);
-    const items = await r.json();
-    renderHistory(items);
+    renderHistory(await r.json());
   } catch (e) {
-    historyList.innerHTML = `<div id="history-empty">No history yet (${e.message})</div>`;
+    historyList.innerHTML = `<div id="history-empty">No history (${e.message})</div>`;
   }
 }
-
 function renderHistory(items) {
   if (!items.length) {
-    historyList.innerHTML = `<div id="history-empty">No shots saved yet.</div>`;
+    historyList.innerHTML = `<div id="history-empty">No shots saved yet</div>`;
     return;
   }
   historyList.innerHTML = items.map(it => {
     const when = it.saved_at || it.file;
-    const dur = it.duration_s != null ? `${it.duration_s.toFixed(1)}s` : '—';
-    const wt = it.final_weight_g != null ? `${it.final_weight_g.toFixed(1)}g` : '—';
+    const dur = it.duration_s != null ? `${it.duration_s.toFixed(1)} s` : '—';
+    const wt = it.final_weight_g != null ? `${it.final_weight_g.toFixed(1)}<span class="u">g</span>` : '—';
     const flow = it.peak_flow_g_s != null ? `${it.peak_flow_g_s.toFixed(2)} g/s peak` : '';
     const tank = it.tank_pct_at_start != null ? `tank ${Math.round(it.tank_pct_at_start)}%` : '';
     const meta = [flow, tank].filter(Boolean).join(' · ');
     const sel = it.file === selectedFile ? ' selected' : '';
-    return `
-      <div class="row${sel}" data-file="${it.file}">
-        <span class="when">${when}</span>
-        <span><span class="weight-val">${wt}</span> <span class="stats">in ${dur}</span></span>
-        <span class="stats">${meta}</span>
-      </div>`;
+    return `<div class="row${sel}" data-file="${it.file}">
+      <div class="when">${when}</div>
+      <div class="top"><div class="weight-val">${wt}</div><div class="duration">${dur}</div></div>
+      <div class="meta">${meta}</div>
+    </div>`;
   }).join('');
   historyList.querySelectorAll('.row').forEach(r => {
     r.addEventListener('click', () => replayShot(r.dataset.file));
@@ -330,24 +689,18 @@ async function replayShot(file) {
     const shot = await r.json();
     selectedFile = file;
     mode = 'replay';
-    setBadge('REPLAY', 'replay');
-    clearChart();
+    setBadge('Replay', 'replay');
 
-    const samples = shot.samples || [];
-    const xs = samples.map(s => (s.t_ms ?? 0) / 1000);
-    Plotly.restyle('g', {
-      x: [xs, xs],
-      y: [samples.map(s => s.weight_g), samples.map(s => s.flow_g_s)],
-    }, [0, 1]);
-
-    weightEl.style.display = '';
-    elapsedEl.style.display = '';
-    flowEl.style.display = 'none';
-    weightV.textContent = (shot.final_weight_g ?? 0).toFixed(1);
-    elapsedEl.textContent = `${(shot.duration_s ?? 0).toFixed(1)} s`;
-    showEndSummary(shot);
+    const samples = (shot.samples || []).map(s => ({ t: (s.t_ms ?? 0)/1000, w: s.weight_g, f: s.flow_g_s }));
+    chart.setShot(samples, {
+      preinfusion_s: shot.preinfusion_s,
+      first_drop_at_ms: shot.first_drop_at_ms,
+    });
+    setWeight(shot.final_weight_g ?? 0);
+    setElapsed(shot.duration_s ?? 0);
+    setFlow(shot.peak_flow_g_s ?? 0);
     if (shot.tank_pct_at_start != null) tankV.textContent = Math.round(shot.tank_pct_at_start);
-    // re-render history for the .selected highlight
+    showReceipt(shot);
     loadHistory();
   } catch (e) {
     statusEl.textContent = `replay failed: ${e.message}`;
@@ -359,30 +712,28 @@ function backToLive() {
   mode = 'live';
   selectedFile = null;
   activeShotId = null;
-  clearChart();
-  hideOverlay();
-  hideEndSummary();
-  setBadge('IDLE', 'idle');
+  chart.reset();
+  setWeight(0); setElapsed(0); setFlow(0);
+  weightV.textContent = '—';
+  hideReceipt();
+  setBadge('Idle', 'idle');
   loadHistory();
 }
 
-// --- Tab switching ---
+// ---------- tabs ----------
 function setHistoryOpen(open) {
   mainEl.classList.toggle('history-open', open);
   document.querySelector('[data-mode="history"]').classList.toggle('active', open);
   if (open) loadHistory();
 }
-
 document.querySelector('[data-mode="live"]').addEventListener('click', () => {
   document.querySelector('[data-mode="live"]').classList.add('active');
   setHistoryOpen(false);
   if (mode === 'replay') backToLive();
 });
-
 document.querySelector('[data-mode="history"]').addEventListener('click', () => {
   setHistoryOpen(!mainEl.classList.contains('history-open'));
 });
-
 $('close-history').addEventListener('click', () => setHistoryOpen(false));
 $('back-to-live').addEventListener('click', () => {
   setHistoryOpen(false);
@@ -390,7 +741,6 @@ $('back-to-live').addEventListener('click', () => {
   backToLive();
 });
 
-// Initial fetch (so the count is fresh in case the user toggles to history)
 loadHistory();
 </script>
 </body>
