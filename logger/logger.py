@@ -4,16 +4,23 @@ Samples are buffered in memory between coffee/shot/start and coffee/shot/end
 and attached to the saved file so the dashboard can replay each shot from
 disk without needing a per-sample archive.
 
+A rolling buffer of the always-on `coffee/scale/weight` stream is also kept
+so each saved shot file includes the few seconds of weight readings *before*
+the firmware's >1g shot detector triggered — that way replay shows the real
+first drop / preinfusion plateau, matching what the live dashboard shows.
+
 Also maintains shots/index.json (newest first) for the history view.
 """
 
 import datetime
 import glob
 import json
+import math
 import os
 import re
 import sys
-from collections import defaultdict
+import time
+from collections import defaultdict, deque
 
 import paho.mqtt.client as mqtt
 
@@ -24,12 +31,21 @@ PORT = int(os.environ.get("MQTT_PORT", "1883"))
 T_START = "coffee/shot/start"
 T_SAMPLE = "coffee/shot/sample"
 T_END = "coffee/shot/end"
+T_SCALE_W = "coffee/scale/weight"
 
 INDEX = "index.json"
 FILENAME_TS_RE = re.compile(r"^(\d{8}T\d{6}Z)_")
 
-# In-flight shots: shot_id -> {"start": dict|None, "samples": [dict]}
-shots_in_flight: dict[str, dict] = defaultdict(lambda: {"start": None, "samples": []})
+SCALE_BUFFER_SEC = 30.0
+PREPEND_LOOKBACK_SEC = 5.0
+
+# In-flight shots: shot_id -> {"start": dict|None, "samples": [dict], "prepend": [dict]}
+shots_in_flight: dict[str, dict] = defaultdict(
+    lambda: {"start": None, "samples": [], "prepend": []}
+)
+
+# Rolling (epoch_seconds, weight_g) tuples from coffee/scale/weight
+scale_buffer: deque = deque()
 
 
 def utc_iso() -> str:
@@ -76,13 +92,28 @@ def rebuild_index() -> None:
 def on_connect(client, userdata, flags, rc, properties=None):
     if rc == 0:
         print(f"connected to {BROKER}:{PORT}", flush=True)
-        client.subscribe([(T_START, 0), (T_SAMPLE, 0), (T_END, 0)])
-        print(f"subscribed: {T_START}, {T_SAMPLE}, {T_END}", flush=True)
+        client.subscribe([(T_START, 0), (T_SAMPLE, 0), (T_END, 0), (T_SCALE_W, 0)])
+        print(f"subscribed: {T_START}, {T_SAMPLE}, {T_END}, {T_SCALE_W}", flush=True)
     else:
         print(f"connect failed rc={rc}", flush=True)
 
 
 def on_message(client, userdata, msg):
+    # coffee/scale/weight is plain numeric — handle separately and bail.
+    if msg.topic == T_SCALE_W:
+        try:
+            w = float(msg.payload)
+        except ValueError:
+            return
+        if math.isnan(w):
+            return
+        now = time.time()
+        scale_buffer.append((now, w))
+        cutoff = now - SCALE_BUFFER_SEC
+        while scale_buffer and scale_buffer[0][0] < cutoff:
+            scale_buffer.popleft()
+        return
+
     try:
         payload = json.loads(msg.payload)
     except json.JSONDecodeError as e:
@@ -95,8 +126,21 @@ def on_message(client, userdata, msg):
         return
 
     if msg.topic == T_START:
-        shots_in_flight[shot_id] = {"start": payload, "samples": []}
-        print(f"shot {shot_id} started", flush=True)
+        # Capture the rolling-buffer prepend at trigger time; store with
+        # negative t_ms so it slots in before the live samples.
+        start_wall = time.time()
+        cutoff = start_wall - PREPEND_LOOKBACK_SEC
+        prepend = [
+            {"t_ms": int((ts - start_wall) * 1000), "weight_g": w, "flow_g_s": 0.0}
+            for ts, w in scale_buffer
+            if ts >= cutoff
+        ]
+        shots_in_flight[shot_id] = {
+            "start": payload,
+            "samples": [],
+            "prepend": prepend,
+        }
+        print(f"shot {shot_id} started ({len(prepend)} prepend samples)", flush=True)
 
     elif msg.topic == T_SAMPLE:
         shots_in_flight[shot_id]["samples"].append({
@@ -106,9 +150,11 @@ def on_message(client, userdata, msg):
         })
 
     elif msg.topic == T_END:
-        buf = shots_in_flight.pop(shot_id, {"start": None, "samples": []})
+        buf = shots_in_flight.pop(
+            shot_id, {"start": None, "samples": [], "prepend": []}
+        )
         record = dict(payload)
-        record.setdefault("samples", buf["samples"])
+        record.setdefault("samples", buf["prepend"] + buf["samples"])
         if buf["start"] and "tank_pct_at_start" not in record:
             record["tank_pct_at_start"] = buf["start"].get("tank_pct_at_start")
 

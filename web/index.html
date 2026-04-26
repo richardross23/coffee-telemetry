@@ -367,6 +367,20 @@ let mode = 'live';
 let activeShotId = null;
 let selectedFile = null;
 
+// Rolling buffer of always-on weight samples (Acaia stream).
+// Used to prepend the chart at shot/start so we see the *real* first drops
+// (the firmware's shot detector requires weight>1g, missing the lead-in).
+const SCALE_BUFFER_MS = 30000;
+const PREPEND_LOOKBACK_MS = 5000;
+const scaleBuffer = []; // {ts: epoch_ms, w: number}
+function pushScale(w) {
+  if (!Number.isFinite(w)) return;
+  const now = Date.now();
+  scaleBuffer.push({ ts: now, w });
+  const cutoff = now - SCALE_BUFFER_MS;
+  while (scaleBuffer.length && scaleBuffer[0].ts < cutoff) scaleBuffer.shift();
+}
+
 // ---------- weight tween ----------
 let displayedWeight = 0;
 let targetWeight = 0;
@@ -433,9 +447,15 @@ class ShotChart {
   }
 
   // Data → SVG pixel coords
+  xRange() {
+    const minT = Math.min(0, this.samples[0]?.t ?? 0);
+    const maxT = Math.max(this.fixedMaxT, this.samples.at(-1)?.t ?? 0);
+    return [minT, maxT];
+  }
   xScale(t) {
-    const maxT = Math.max(this.fixedMaxT, this.samples.length ? this.samples.at(-1).t : 0);
-    return this.pad.l + (t / maxT) * (this.W - this.pad.l - this.pad.r);
+    const [minT, maxT] = this.xRange();
+    const span = maxT - minT || 1;
+    return this.pad.l + ((t - minT) / span) * (this.W - this.pad.l - this.pad.r);
   }
   yScaleW(w) {
     const maxW = Math.max(this.fixedMaxW, ...this.samples.map(s => s.w || 0));
@@ -551,8 +571,8 @@ class ShotChart {
   }
 
   invertX(px) {
-    const maxT = Math.max(this.fixedMaxT, this.samples.length ? this.samples.at(-1).t : 0);
-    return ((px - this.pad.l) / (this.W - this.pad.l - this.pad.r)) * maxT;
+    const [minT, maxT] = this.xRange();
+    return minT + ((px - this.pad.l) / (this.W - this.pad.l - this.pad.r)) * (maxT - minT);
   }
 
   hideTooltip() {
@@ -598,6 +618,7 @@ client.on('connect', () => {
   statusEl.className = 'connected';
   client.subscribe([
     'coffee/shot/start', 'coffee/shot/sample', 'coffee/shot/end',
+    'coffee/scale/weight',
     'coffee/water/pct', 'coffee/device/state',
   ]);
 });
@@ -617,16 +638,28 @@ client.on('message', (topic, msg) => {
     deviceBadge.style.display = (text === 'online') ? 'none' : '';
     return;
   }
+  if (topic === 'coffee/scale/weight') {
+    pushScale(parseFloat(text));
+    return;
+  }
   if (mode === 'replay') return;
 
   if (topic === 'coffee/shot/start') {
     activeShotId = p.shot_id;
-    chart.reset();
     hideStats();
     setBadge('Extracting', 'extracting');
     displayedWeight = 0; setWeight(0);
     setElapsed(0); setFlow(0);
     if (p.tank_pct_at_start != null) tankV.textContent = Math.round(p.tank_pct_at_start);
+
+    // Prepend the rolling weight buffer so the chart starts at the real
+    // first drop, not at the firmware's >1g detection trigger.
+    const startWall = Date.now();
+    const cutoff = startWall - PREPEND_LOOKBACK_MS;
+    const prepend = scaleBuffer
+      .filter(e => e.ts >= cutoff)
+      .map(e => ({ t: (e.ts - startWall) / 1000, w: e.w, f: 0 }));
+    chart.setShot(prepend, {});
   } else if (topic === 'coffee/shot/sample') {
     if (activeShotId == null) {
       activeShotId = p.shot_id;
