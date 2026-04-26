@@ -695,13 +695,27 @@ async function loadHistory() {
     historyList.innerHTML = `<div id="history-empty">No history (${e.message})</div>`;
   }
 }
+const TIME_ZONE = 'Australia/Melbourne';
+const whenFmt = new Intl.DateTimeFormat('en-AU', {
+  timeZone: TIME_ZONE,
+  weekday: 'short', day: 'numeric', month: 'short',
+  hour: '2-digit', minute: '2-digit', hourCycle: 'h23',
+});
+function formatWhen(iso) {
+  if (!iso) return '';
+  const d = new Date(iso);
+  if (isNaN(d)) return iso;
+  // en-AU produces "Sun, 26 Apr, 21:45" — drop the second comma for tightness
+  return whenFmt.format(d).replace(/,([^,]*)$/, ' ·$1');
+}
+
 function renderHistory(items) {
   if (!items.length) {
     historyList.innerHTML = `<div id="history-empty">No shots saved yet</div>`;
     return;
   }
   historyList.innerHTML = items.map(it => {
-    const when = it.saved_at || it.file;
+    const when = formatWhen(it.saved_at) || it.file;
     const dur = it.duration_s != null ? `${it.duration_s.toFixed(1)} s` : '—';
     const wt = it.final_weight_g != null ? `${it.final_weight_g.toFixed(1)}<span class="u">g</span>` : '—';
     const flow = it.peak_flow_g_s != null ? `${it.peak_flow_g_s.toFixed(2)} g/s peak` : '';
