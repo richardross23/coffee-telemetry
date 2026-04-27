@@ -172,6 +172,24 @@
     opacity: 1; transform: translateY(0);
   }
 
+  /* Bean / grinder / dose summary under the subhero */
+  #shotinfo {
+    margin-top: 8px;
+    font-size: 12px; color: var(--fg-2);
+    letter-spacing: 0.04em;
+    display: flex; flex-wrap: wrap; gap: 4px 14px;
+    max-width: 60ch;
+    transition: opacity 0.2s;
+  }
+  #shotinfo:empty { display: none; }
+  #shotinfo .bean { color: var(--fg); }
+  #shotinfo .dose { color: var(--copper-bright); font-variant-numeric: tabular-nums; font-weight: 500; }
+  #shotinfo .grind { color: var(--cream); font-variant-numeric: tabular-nums; }
+  #shotinfo .roast { color: var(--dim); }
+  @media (max-width: 600px) {
+    #shotinfo { font-size: 11px; gap: 2px 10px; }
+  }
+
   /* ---------- history panel ---------- */
   #history {
     position: fixed; right: 0; top: 53px; bottom: 0; width: 340px;
@@ -380,6 +398,7 @@
         <div id="stat-pre"><span class="label">preinfusion</span><span id="pre-v">—s</span></div>
         <div id="stat-peak"><span class="label">peak</span><span id="peak-v">— g/s</span></div>
       </div>
+      <div id="shotinfo"></div>
     </div>
 
     <div id="chart-wrap">
@@ -972,6 +991,30 @@ function hideStats() {
 function setElapsed(s) { elapsedV.textContent = (Number.isFinite(s) ? s : 0).toFixed(1) + 's'; }
 function setFlow(f) { flowV.textContent = (Number.isFinite(f) ? f : 0).toFixed(2) + ' g/s'; }
 
+// Render the bean / grinder / dose summary under the subhero.
+// `savedAtIso` lets us compute days-off-roast when replaying a saved shot;
+// for live shots we fall back to "today" so the days-off number is current.
+function setShotInfo(meta, savedAtIso) {
+  const el = $('shotinfo');
+  if (!meta || typeof meta !== 'object') { el.innerHTML = ''; return; }
+  const parts = [];
+  const bean = [meta.bean_brand, meta.bean_type].filter(Boolean).join(' · ');
+  if (bean) parts.push(`<span class="bean">${escapeHtml(bean)}</span>`);
+  if (meta.bean_weight_g != null) parts.push(`<span class="dose">${(+meta.bean_weight_g).toFixed(1)}g dose</span>`);
+  if (meta.grinder_setting) parts.push(`<span class="grind">${escapeHtml(meta.grinder_setting)}</span>`);
+  if (meta.roast_date) {
+    const ref = savedAtIso ? new Date(savedAtIso) : new Date();
+    const roast = new Date(meta.roast_date);
+    if (!isNaN(roast)) {
+      const days = Math.round((ref - roast) / 86400000);
+      parts.push(`<span class="roast">${days}d off roast</span>`);
+    }
+  }
+  if (meta.roast_level) parts.push(`<span class="roast">${escapeHtml(meta.roast_level)}</span>`);
+  el.innerHTML = parts.join('<span class="dim">·</span> ');
+}
+function clearShotInfo() { $('shotinfo').innerHTML = ''; }
+
 // ---------- MQTT ----------
 const wsUrl = `ws://${window.location.hostname}:9001`;
 const client = mqtt.connect(wsUrl, {
@@ -1016,6 +1059,7 @@ client.on('message', (topic, msg) => {
     displayedWeight = 0; setWeight(0);
     setElapsed(0); setFlow(0);
     $('flow-label').textContent = 'flow';
+    setShotInfo(loadSticky());
     if (p.tank_pct_at_start != null) tankV.textContent = Math.round(p.tank_pct_at_start);
 
     // Prepend the rolling weight buffer so the chart starts at the real
@@ -1291,6 +1335,11 @@ document.addEventListener('keydown', (e) => {
   if (e.key === 'Escape' && editOverlay.classList.contains('visible')) closeEdit();
 });
 
+// On submit we also refresh the on-screen #shotinfo line so the user sees
+// the new values reflected immediately (especially when editing the live
+// or replayed shot they're currently looking at).
+editForm.addEventListener('submit', () => { setTimeout(() => setShotInfo(loadSticky()), 50); });
+
 // ---------- two-shot compare overlay ----------
 let compareFile = null;
 async function toggleCompare(file) {
@@ -1342,6 +1391,7 @@ async function replayShot(file) {
     const ratioStr = (Number.isFinite(dose) && dose > 0 && shot.final_weight_g)
       ? `1:${(shot.final_weight_g / dose).toFixed(2)}` : null;
     showStats({ ...shot, peak_flow_g_s: peak, brew_ratio_str: ratioStr });
+    setShotInfo(shot.metadata, parseSavedAt(file));
     loadHistory();
   } catch (e) {
     statusEl.textContent = `replay failed: ${e.message}`;
@@ -1358,6 +1408,8 @@ function backToLive() {
   weightV.textContent = '—';
   $('flow-label').textContent = 'flow';
   hideStats();
+  // Show the queued setup so the user can confirm at a glance.
+  setShotInfo(loadSticky());
   setBadge('Idle', 'idle');
   loadHistory();
 }
@@ -1384,6 +1436,7 @@ $('back-to-live').addEventListener('click', () => {
 });
 
 loadHistory();
+setShotInfo(loadSticky());
 </script>
 </body>
 </html>
