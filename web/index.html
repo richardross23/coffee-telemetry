@@ -228,6 +228,24 @@
   .row .weight-val .u { font-size: 11px; color: var(--dim); font-style: italic; margin-left: 1px; }
   .row .duration { font-size: 11px; color: var(--fg-2); font-variant-numeric: tabular-nums; }
   .row .meta { font-size: 10px; color: var(--dim); letter-spacing: 0.04em; }
+  .row.compare {
+    background: rgba(232, 178, 96, 0.08);
+    border-left: 2px solid var(--warn);
+    padding-left: 16px;
+  }
+  .row-actions {
+    display: flex; gap: 6px; margin-top: 6px;
+    opacity: 0; transition: opacity 0.15s;
+  }
+  .row:hover .row-actions, .row.selected .row-actions, .row.compare .row-actions { opacity: 1; }
+  .row-btn {
+    background: none; border: 1px solid var(--line-bright); color: var(--dim);
+    font: 500 9px/1 'Inter', sans-serif; letter-spacing: 0.08em; text-transform: uppercase;
+    padding: 4px 8px; border-radius: 3px; cursor: pointer;
+    transition: all 0.15s;
+  }
+  .row-btn:hover { color: var(--copper-bright); border-color: var(--copper); }
+  .row.compare .row-btn[data-action="compare"] { color: var(--warn); border-color: var(--warn); }
   #history-empty { padding: 40px 18px; color: var(--dim); font-size: 12px; text-align: center; font-style: italic; }
 
   /* ---------- mobile / tablet ---------- */
@@ -318,8 +336,11 @@
         <rect class="preinfusion-band" fill="rgba(212, 145, 92, 0.06)" stroke="rgba(212, 145, 92, 0.18)" stroke-dasharray="2 4" stroke-width="1" x="0" y="0" width="0" height="100%"/>
         <line class="first-drop" stroke="var(--copper)" stroke-width="1" stroke-dasharray="3 3" opacity="0" x1="0" x2="0" y1="0" y2="100%"/>
         <path class="weight-fill" fill="url(#weight-grad)" d=""/>
+        <path class="compare-weight" fill="none" stroke="var(--fg-2)" stroke-width="1.5" stroke-linejoin="round" stroke-linecap="round" opacity="0.35" stroke-dasharray="4 3" d=""/>
+        <path class="compare-flow" fill="none" stroke="var(--fg-2)" stroke-width="1" stroke-linejoin="round" stroke-linecap="round" opacity="0.25" stroke-dasharray="2 3" d=""/>
         <path class="flow-curve" fill="none" stroke="var(--cream)" stroke-width="1.5" stroke-linejoin="round" stroke-linecap="round" opacity="0.55" d=""/>
         <path class="weight-curve" fill="none" stroke="var(--copper-bright)" stroke-width="2.2" stroke-linejoin="round" stroke-linecap="round" filter="url(#glow)" d=""/>
+        <g class="axis-labels"></g>
         <line class="cursor" stroke="var(--fg-2)" stroke-width="1" stroke-dasharray="2 3" opacity="0" x1="0" x2="0" y1="0" y2="100%"/>
         <circle class="cursor-dot weight" r="4" fill="var(--copper-bright)" opacity="0" filter="url(#glow)"/>
         <circle class="cursor-dot flow" r="3" fill="var(--cream)" opacity="0"/>
@@ -426,9 +447,14 @@ class ShotChart {
     this.weightFill = svg.querySelector('.weight-fill');
     this.weightCurve = svg.querySelector('.weight-curve');
     this.flowCurve = svg.querySelector('.flow-curve');
+    this.compareWeight = svg.querySelector('.compare-weight');
+    this.compareFlow = svg.querySelector('.compare-flow');
     this.cursorLine = svg.querySelector('.cursor');
     this.cursorDotW = svg.querySelector('.cursor-dot.weight');
     this.cursorDotF = svg.querySelector('.cursor-dot.flow');
+    this.axisG = svg.querySelector('.axis-labels');
+
+    this.compareSamples = null;
 
     this.resize();
     new ResizeObserver(() => { this.resize(); this.render(); }).observe(svg);
@@ -488,7 +514,39 @@ class ShotChart {
     this.render();
   }
   setMeta(meta) { Object.assign(this.meta, meta); this.render(); }
-  reset() { this.samples = []; this.meta = {}; this.flowSmoothed = 0; this.render(); }
+  reset() { this.samples = []; this.meta = {}; this.flowSmoothed = 0; this.compareSamples = null; this.render(); }
+
+  // Set/clear a second shot for overlay compare. Samples are normalised
+  // so the compare curve's first-drop aligns with the primary's first-drop.
+  setCompare(samples) {
+    if (!samples || !samples.length) {
+      this.compareSamples = null;
+      this.render();
+      return;
+    }
+    // Compute compare's own first-drop, derive flow, then re-time relative
+    // to it so the curves overlay sensibly even if pour times differ.
+    const filtered = samples.filter(s => Number.isFinite(s.t) && Number.isFinite(s.w));
+    let consec = 0, t0 = filtered[0]?.t ?? 0;
+    for (let i = 0; i < filtered.length; i++) {
+      if ((filtered[i].w || 0) >= 0.1) {
+        if (++consec >= 2) { t0 = filtered[i - 1].t; break; }
+      } else { consec = 0; }
+    }
+    let smoothed = 0;
+    const out = filtered.map((s, i, arr) => {
+      const tStart = s.t - this.flowWindowS;
+      let j = i;
+      while (j > 0 && arr[j - 1].t >= tStart) j--;
+      const dT = s.t - arr[j].t;
+      const dW = s.w - arr[j].w;
+      const raw = dT > 0 ? Math.max(0, dW / dT) : 0;
+      smoothed = this.flowEma * raw + (1 - this.flowEma) * smoothed;
+      return { t: s.t - t0, w: s.w, f: smoothed };
+    });
+    this.compareSamples = out;
+    this.render();
+  }
 
   // Sliding-window derivative + EMA smoothing. Mutates samples[i].f.
   _deriveFlowAt(i) {
@@ -541,6 +599,9 @@ class ShotChart {
   }
 
   render() {
+    this._renderAxes();
+    this._renderCompare();
+
     if (!this.samples.length) {
       this.weightCurve.setAttribute('d', '');
       this.flowCurve.setAttribute('d', '');
@@ -551,6 +612,7 @@ class ShotChart {
     }
 
     // weight curve
+    const t0 = this.firstDropT() ?? 0;
     let dW = '', dF = '';
     this.samples.forEach((s, i) => {
       const x = this.xScale(s.t);
@@ -563,10 +625,10 @@ class ShotChart {
     this.flowCurve.setAttribute('d', dF);
 
     // weight fill (close to baseline)
-    const x0 = this.xScale(this.samples[0].t);
-    const xN = this.xScale(this.samples.at(-1).t);
+    const xLeft = this.xScale(this.samples[0].t);
+    const xRight = this.xScale(this.samples.at(-1).t);
     const yBase = this.H - this.pad.b;
-    this.weightFill.setAttribute('d', `M${x0} ${yBase} ` + dW.slice(1) + `L${xN} ${yBase} Z`);
+    this.weightFill.setAttribute('d', `M${xLeft} ${yBase} ` + dW.slice(1) + `L${xRight} ${yBase} Z`);
 
     // preinfusion band: 0 to first_drop_at_ms (or preinfusion_s)
     const preEnd = this.meta.first_drop_at_ms != null
@@ -587,6 +649,73 @@ class ShotChart {
     } else {
       this.preBand.setAttribute('width', 0);
       this.firstDrop.setAttribute('opacity', 0);
+    }
+  }
+
+  _renderCompare() {
+    if (!this.compareSamples || !this.compareSamples.length) {
+      this.compareWeight.setAttribute('d', '');
+      this.compareFlow.setAttribute('d', '');
+      return;
+    }
+    // Anchor compare so its first-drop aligns with primary's first-drop.
+    const primaryT0 = this.firstDropT() ?? 0;
+    let dW = '', dF = '';
+    this.compareSamples.forEach((s, i) => {
+      const t = s.t + primaryT0;
+      const x = this.xScale(t);
+      dW += (i === 0 ? 'M' : 'L') + x.toFixed(1) + ' ' + this.yScaleW(s.w).toFixed(1) + ' ';
+      dF += (i === 0 ? 'M' : 'L') + x.toFixed(1) + ' ' + this.yScaleF(s.f ?? 0).toFixed(1) + ' ';
+    });
+    this.compareWeight.setAttribute('d', dW);
+    this.compareFlow.setAttribute('d', dF);
+  }
+
+  _renderAxes() {
+    if (!this.axisG) return;
+    while (this.axisG.firstChild) this.axisG.removeChild(this.axisG.firstChild);
+    const SVGNS = 'http://www.w3.org/2000/svg';
+    const mk = (tag, attrs, text) => {
+      const el = document.createElementNS(SVGNS, tag);
+      for (const k in attrs) el.setAttribute(k, attrs[k]);
+      if (text != null) el.textContent = text;
+      this.axisG.appendChild(el);
+      return el;
+    };
+
+    // X axis: ticks at every 5s of Acaia time (relative to first drop).
+    const t0 = this.firstDropT() ?? 0;
+    const [minT, maxT] = this.xRange();
+    const xMin = minT - t0, xMax = maxT - t0;
+    const xStep = 5;
+    const xStart = Math.ceil(xMin / xStep) * xStep;
+    for (let v = xStart; v <= xMax; v += xStep) {
+      const px = this.xScale(v + t0);
+      mk('text', {
+        x: px, y: this.H - 8, fill: '#7a6a58',
+        'font-size': 10, 'text-anchor': 'middle', 'font-family': 'Inter, sans-serif',
+      }, `${v}s`);
+    }
+
+    // Y axis (weight, left): ticks every 10g.
+    const maxW = Math.max(this.fixedMaxW, ...this.samples.map(s => s.w || 0));
+    const yStep = 10;
+    for (let v = 0; v <= maxW; v += yStep) {
+      const py = this.yScaleW(v);
+      mk('text', {
+        x: 8, y: py + 3, fill: '#7a6a58',
+        'font-size': 10, 'text-anchor': 'start', 'font-family': 'Inter, sans-serif',
+      }, `${v}g`);
+    }
+
+    // Y axis (flow, right): ticks every 1 g/s.
+    const maxF = Math.max(this.fixedMaxF, ...this.samples.map(s => s.f || 0));
+    for (let v = 0; v <= maxF; v += 1) {
+      const py = this.yScaleF(v);
+      mk('text', {
+        x: this.W - 8, y: py + 3, fill: '#7a6a58',
+        'font-size': 10, 'text-anchor': 'end', 'font-family': 'Inter, sans-serif',
+      }, `${v}g/s`);
     }
   }
 
@@ -792,15 +921,118 @@ function renderHistory(items) {
     const tank = it.tank_pct_at_start != null ? `tank ${Math.round(it.tank_pct_at_start)}%` : '';
     const meta = [avgStr, tank].filter(Boolean).join(' · ');
     const sel = it.file === selectedFile ? ' selected' : '';
-    return `<div class="row${sel}" data-file="${it.file}">
+    const isCompare = compareFile === it.file;
+    return `<div class="row${sel}${isCompare ? ' compare' : ''}" data-file="${it.file}">
       <div class="when">${when}</div>
       <div class="top"><div class="weight-val">${wt}</div><div class="duration">${dur}</div></div>
       <div class="meta">${meta}</div>
+      <div class="row-actions">
+        <button class="row-btn" data-action="compare" title="Overlay this shot on the current chart">${isCompare ? '✕ compare' : '⇄ compare'}</button>
+        <button class="row-btn" data-action="export" title="Download as Decent .shot JSON (opens in Visualizer)">↓ .shot</button>
+      </div>
     </div>`;
   }).join('');
   historyList.querySelectorAll('.row').forEach(r => {
-    r.addEventListener('click', () => replayShot(r.dataset.file));
+    r.addEventListener('click', (e) => {
+      const action = e.target.closest('[data-action]')?.dataset.action;
+      if (action === 'compare') { e.stopPropagation(); toggleCompare(r.dataset.file); return; }
+      if (action === 'export')  { e.stopPropagation(); exportDecent(r.dataset.file); return; }
+      replayShot(r.dataset.file);
+    });
   });
+}
+
+// ---------- Decent .shot JSON export ----------
+// Visualizer + the Decent ecosystem all read this format. We have weight
+// (real) and flow (derived); pressure/temperature aren't available so we
+// omit them. Times are normalised to seconds since first drop so the
+// shot opens cleanly in any tool that expects elapsed[] to start at 0.
+async function exportDecent(file) {
+  try {
+    const r = await fetch(`/shots/${encodeURIComponent(file)}`, { cache: 'no-store' });
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    const shot = await r.json();
+    const samples = (shot.samples || []).map(s => ({
+      t: (s.t_ms ?? 0) / 1000,
+      w: Number(s.weight_g) || 0,
+    }));
+    if (!samples.length) throw new Error('shot has no samples');
+
+    // Find first drop (same logic as ShotChart.firstDropT) to anchor t=0
+    const threshold = 0.1;
+    let consecutive = 0, t0 = samples[0].t;
+    for (let i = 0; i < samples.length; i++) {
+      if (samples[i].w >= threshold) {
+        if (++consecutive >= 2) { t0 = samples[i - 1].t; break; }
+      } else { consecutive = 0; }
+    }
+
+    // Recompute derived flow over the normalised samples
+    const flowWindowS = 1.0, flowEma = 0.4;
+    let smoothed = 0;
+    const flow = [];
+    for (let i = 0; i < samples.length; i++) {
+      const tStart = samples[i].t - flowWindowS;
+      let j = i;
+      while (j > 0 && samples[j - 1].t >= tStart) j--;
+      const dT = samples[i].t - samples[j].t;
+      const dW = samples[i].w - samples[j].w;
+      const raw = dT > 0 ? Math.max(0, dW / dT) : 0;
+      smoothed = flowEma * raw + (1 - flowEma) * smoothed;
+      flow.push(+smoothed.toFixed(3));
+    }
+
+    const elapsed = samples.map(s => +(s.t - t0).toFixed(2));
+    const weight = samples.map(s => +s.w.toFixed(2));
+    const decent = {
+      clock: Math.floor(Date.parse(shot.saved_at || new Date().toISOString()) / 1000) || Math.floor(Date.now() / 1000),
+      timestamp: Math.floor(Date.parse(shot.saved_at || new Date().toISOString()) / 1000) || Math.floor(Date.now() / 1000),
+      espresso_elapsed: elapsed,
+      elapsed,
+      flow: { flow, by_weight: flow },
+      totals: { weight },
+      profile: { title: 'coffee-tank' },
+      espresso_notes: `Captured by coffee-telemetry. Yield ${shot.final_weight_g ?? '?'}g · pour ${(shot.pour_time_s ?? shot.duration_s ?? '?')}s · tank ${shot.tank_pct_at_start ?? '?'}%`,
+    };
+
+    const blob = new Blob([JSON.stringify(decent, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = file.replace(/\.json$/, '.shot.json');
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  } catch (e) {
+    statusEl.textContent = `export failed: ${e.message}`;
+    statusEl.className = 'error';
+  }
+}
+
+// ---------- two-shot compare overlay ----------
+let compareFile = null;
+async function toggleCompare(file) {
+  if (compareFile === file) {
+    compareFile = null;
+    chart.setCompare(null);
+    loadHistory();
+    return;
+  }
+  try {
+    const r = await fetch(`/shots/${encodeURIComponent(file)}`, { cache: 'no-store' });
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    const shot = await r.json();
+    const samples = (shot.samples || [])
+      .map(s => ({ t: (s.t_ms ?? 0) / 1000, w: s.weight_g, f: 0 }))
+      .filter(s => Number.isFinite(s.t) && Number.isFinite(s.w));
+    compareFile = file;
+    chart.setCompare(samples);
+    loadHistory();
+  } catch (e) {
+    statusEl.textContent = `compare failed: ${e.message}`;
+    statusEl.className = 'error';
+  }
 }
 
 async function replayShot(file) {
