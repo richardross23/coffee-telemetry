@@ -1,19 +1,46 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
-  <!-- Portafilter side view, espresso/copper palette to match the dashboard. -->
-  <!-- Wooden handle -->
-  <rect x="20" y="13" width="11" height="5" rx="1.2" fill="#7a4e2c"/>
-  <rect x="20" y="13" width="11" height="1.4" fill="#a06a3e"/>
-  <!-- Collar where handle meets the basket -->
-  <rect x="18.5" y="11.5" width="2.5" height="8" rx="0.6" fill="#5a4030"/>
-  <!-- Basket body (the chrome cup) -->
-  <path d="M2 10 H19 V18 L15 23 H6 L2 18 Z" fill="#d4915c" stroke="#7a4e2c" stroke-width="0.6" stroke-linejoin="round"/>
-  <!-- Highlight along the top of the basket -->
-  <rect x="3" y="10.5" width="15" height="1" fill="#ecaa72"/>
-  <!-- Coffee puck visible at the top -->
-  <ellipse cx="10.5" cy="10" rx="8" ry="1.4" fill="#2a1812"/>
-  <!-- Twin spouts -->
-  <rect x="7.5" y="23" width="2" height="3" rx="0.4" fill="#5a4030"/>
-  <rect x="11.5" y="23" width="2" height="3" rx="0.4" fill="#5a4030"/>
-  <!-- Drip — a single bead of espresso falling -->
-  <ellipse cx="8.5" cy="29" rx="0.7" ry="1.1" fill="#d4915c"/>
+  <!-- 58mm bottomless portafilter, side view, chrome body + walnut handle.
+       Real proportions: ~58mm basket dia × ~26mm depth × ~120mm handle. -->
+  <defs>
+    <!-- Chrome gradient: edge-light reflections that read as polished metal. -->
+    <linearGradient id="chrome" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%"   stop-color="#7d7d7d"/>
+      <stop offset="18%"  stop-color="#ededed"/>
+      <stop offset="42%"  stop-color="#b8b8b8"/>
+      <stop offset="62%"  stop-color="#dedede"/>
+      <stop offset="86%"  stop-color="#9a9a9a"/>
+      <stop offset="100%" stop-color="#5a5a5a"/>
+    </linearGradient>
+    <linearGradient id="wood" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%"   stop-color="#a06a3e"/>
+      <stop offset="100%" stop-color="#5a3820"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Walnut handle (~58:120 basket-to-handle ratio shrunk for the icon) -->
+  <rect x="20" y="13.5" width="11" height="5" rx="1.2" fill="url(#wood)"/>
+  <rect x="20" y="13.5" width="11" height="1.2" fill="#bf8556" opacity="0.7"/>
+
+  <!-- Stainless collar where handle meets the basket -->
+  <rect x="18" y="12" width="2.6" height="8" rx="0.5" fill="url(#chrome)"/>
+
+  <!-- Top flange (locking lugs ride here) — slightly wider than the body -->
+  <rect x="1.6" y="10" width="17" height="2" rx="0.3" fill="url(#chrome)"/>
+
+  <!-- Basket body. 58mm diameter ≈ 17 viewbox-units wide;
+       26mm depth ≈ 8 units tall. Slight outward taper as on real Pesado / Apex baskets. -->
+  <path d="M2.4 12 H18.2 L17.6 20.5 H3 Z" fill="url(#chrome)"/>
+
+  <!-- Subtle vertical reflection line down the middle of the body -->
+  <line x1="10.3" y1="12.4" x2="10.3" y2="20" stroke="#ffffff" stroke-width="0.4" opacity="0.35"/>
+
+  <!-- Open bottom — that's the whole point of bottomless. The dark line is
+       the underside of the coffee puck visible through the open basket. -->
+  <ellipse cx="10.3" cy="20.5" rx="7.3" ry="0.9" fill="#1c0f08"/>
+
+  <!-- Espresso pouring straight from the puck (no spouts) -->
+  <path d="M8.2 21.4 Q8.5 25 8.6 30
+           M10.4 21.4 Q10.4 25 10.4 30
+           M12.6 21.4 Q12.4 25 12.2 30"
+        stroke="#7a3e1a" stroke-width="0.55" fill="none" stroke-linecap="round" opacity="0.85"/>
 </svg>
