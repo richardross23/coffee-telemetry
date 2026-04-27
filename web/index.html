@@ -559,11 +559,14 @@ class ShotChart {
     this.fixedMaxW = 50;   // grams
     this.fixedMaxF = 3.5;  // g/s
 
-    // Flow is derived from the weight curve (the firmware's flow_g_s
-    // is currently broken — Acaia decoder bug), so we always overwrite
-    // s.f with a sliding-window derivative + EMA smoothing.
+    // Flow is derived from the weight curve via a sliding-window
+    // derivative + EMA. BLE timing irregularities can deliver two
+    // samples within a few ms of each other and inflate ΔW/ΔT
+    // briefly (we've seen 80 g/s — a real espresso peaks 1.5–3 g/s),
+    // so any raw derivative above flowMaxG is clipped before EMA.
     this.flowWindowS = 1.0;
     this.flowEma = 0.4;
+    this.flowMaxG = 8.0;  // physically-impossible-above guard
     this.flowSmoothed = 0;
 
     this.bg = svg.querySelector('.grid-bg');
@@ -677,6 +680,10 @@ class ShotChart {
   }
 
   // Sliding-window derivative + EMA smoothing. Mutates samples[i].f.
+  // Negative gusts clamp to 0 (drips landing unevenly).
+  // Anything above flowMaxG (~espresso physics) is REJECTED entirely —
+  // the EMA holds its previous value through the glitch, so the trace
+  // stays smooth instead of spiking up to the cap and back.
   _deriveFlowAt(i) {
     const s = this.samples[i];
     const tStart = s.t - this.flowWindowS;
@@ -685,9 +692,11 @@ class ShotChart {
     const dT = s.t - this.samples[j].t;
     const dW = s.w - this.samples[j].w;
     const raw = dT > 0 ? dW / dT : 0;
-    // Negative spurts (scale jitter / drips falling unevenly) clamp to 0
-    const clamped = raw > 0 ? raw : 0;
-    this.flowSmoothed = this.flowEma * clamped + (1 - this.flowEma) * this.flowSmoothed;
+    if (raw <= this.flowMaxG) {
+      const clamped = Math.max(0, raw);
+      this.flowSmoothed = this.flowEma * clamped + (1 - this.flowEma) * this.flowSmoothed;
+    }
+    // else: outlier — leave flowSmoothed alone, sample inherits previous value
     s.f = this.flowSmoothed;
   }
 
