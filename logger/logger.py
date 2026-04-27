@@ -96,6 +96,25 @@ def parse_ts(filename: str) -> str:
     return f"{s[0:4]}-{s[4:6]}-{s[6:8]}T{s[9:11]}:{s[11:13]}:{s[13:15]}Z"
 
 
+def latest_metadata() -> dict:
+    """Read the most recent saved shot's metadata for auto-inheriting onto
+    the next shot. Returns an empty dict if no prior shots exist or none
+    have any metadata."""
+    paths = sorted(glob.glob(os.path.join(OUT, "*.json")), reverse=True)
+    for path in paths:
+        if os.path.basename(path) == INDEX:
+            continue
+        try:
+            with open(path) as f:
+                data = json.load(f)
+        except (OSError, json.JSONDecodeError):
+            continue
+        meta = data.get("metadata") or {}
+        if meta:
+            return {k: v for k, v in meta.items() if k in META_ALLOWED_FIELDS}
+    return {}
+
+
 def first_drop_t_ms(samples: list[dict], threshold: float = 0.1) -> int | None:
     """First t_ms where weight crosses threshold for two consecutive samples."""
     consecutive = 0
@@ -305,6 +324,14 @@ def on_message(client, userdata, msg):
         if is_tare:
             print(f"dropped shot {shot_id}: {reason}", flush=True)
             return
+
+        # Auto-inherit bean/grinder/dose/notes from the previous shot — most
+        # users keep the same setup for runs of shots and only change one
+        # variable at a time, so carrying it forward saves a click per shot.
+        # The dashboard's edit modal still lets them override per-shot.
+        inherited = latest_metadata()
+        if inherited:
+            record.setdefault("metadata", inherited)
 
         ts = utc_iso()
         # Sanitise shot_id for the filename

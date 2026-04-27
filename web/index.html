@@ -1207,7 +1207,7 @@ async function exportDecent(file) {
 // localStorage so the form pre-fills with last-used values; the per-shot
 // metadata is published over MQTT and the logger merges it into the file.
 const STICKY_KEY = 'coffee-telemetry/sticky-metadata';
-const STICKY_FIELDS = ['bean_brand','bean_type','roast_date','roast_level','grinder_model','grinder_setting'];
+const STICKY_FIELDS = ['bean_brand','bean_type','roast_date','roast_level','bean_weight_g','grinder_model','grinder_setting'];
 const editOverlay = $('edit-overlay');
 const editForm = $('edit-form');
 const editShotWhen = $('edit-shot-when');
