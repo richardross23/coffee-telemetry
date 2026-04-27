@@ -32,6 +32,16 @@ T_START = "coffee/shot/start"
 T_SAMPLE = "coffee/shot/sample"
 T_END = "coffee/shot/end"
 T_SCALE_W = "coffee/scale/weight"
+T_META_SET = "coffee/shot/metadata/set"
+
+# Whitelist of fields the dashboard is allowed to set on a shot via MQTT.
+# Anything else in the payload is ignored.
+META_ALLOWED_FIELDS = frozenset({
+    "bean_brand", "bean_type", "roast_date", "roast_level",
+    "bean_weight_g",
+    "grinder_model", "grinder_setting",
+    "notes",
+})
 
 INDEX = "index.json"
 FILENAME_TS_RE = re.compile(r"^(\d{8}T\d{6}Z)_")
@@ -100,6 +110,37 @@ def first_drop_t_ms(samples: list[dict], threshold: float = 0.1) -> int | None:
     return None
 
 
+def derive_metadata_summary(meta: dict, saved_at_iso: str | None, final_weight_g: float | None) -> dict:
+    """Build the convenience fields the history list shows at a glance.
+
+    - brew_ratio_str: '1:2.27' if both dose and yield present
+    - days_off_roast: int days between roast_date and saved_at
+    - bean_label: 'Industry Beans · Yirgacheffe' (or whichever side is filled)
+    """
+    out = {}
+    dose = meta.get("bean_weight_g")
+    if dose and final_weight_g and dose > 0:
+        out["brew_ratio_str"] = f"1:{(final_weight_g / dose):.2f}"
+
+    roast = meta.get("roast_date")
+    if roast and saved_at_iso:
+        try:
+            roast_d = datetime.date.fromisoformat(roast)
+            saved_d = datetime.datetime.fromisoformat(
+                saved_at_iso.replace("Z", "+00:00")
+            ).date()
+            out["days_off_roast"] = (saved_d - roast_d).days
+        except (ValueError, TypeError):
+            pass
+
+    parts = [meta.get("bean_brand"), meta.get("bean_type")]
+    label = " · ".join(p for p in parts if p)
+    if label:
+        out["bean_label"] = label
+
+    return out
+
+
 def rebuild_index() -> None:
     """Scan OUT for shot files and rewrite index.json (newest first)."""
     entries = []
@@ -120,9 +161,11 @@ def rebuild_index() -> None:
             if first_t is not None and last_t is not None
             else None
         )
-        entries.append({
+        meta = data.get("metadata") or {}
+        saved_at = parse_ts(name)
+        entry = {
             "file": name,
-            "saved_at": parse_ts(name),
+            "saved_at": saved_at,
             "shot_id": data.get("shot_id"),
             "duration_s": data.get("duration_s"),
             "pour_time_s": pour_time_s,
@@ -130,7 +173,10 @@ def rebuild_index() -> None:
             "peak_flow_g_s": data.get("peak_flow_g_s"),
             "tank_pct_at_start": data.get("tank_pct_at_start"),
             "n_samples": len(samples),
-        })
+            "metadata": meta,
+        }
+        entry.update(derive_metadata_summary(meta, saved_at, data.get("final_weight_g")))
+        entries.append(entry)
     tmp = os.path.join(OUT, INDEX + ".tmp")
     with open(tmp, "w") as f:
         json.dump(entries, f, indent=2)
@@ -140,10 +186,46 @@ def rebuild_index() -> None:
 def on_connect(client, userdata, flags, rc, properties=None):
     if rc == 0:
         print(f"connected to {BROKER}:{PORT}", flush=True)
-        client.subscribe([(T_START, 0), (T_SAMPLE, 0), (T_END, 0), (T_SCALE_W, 0)])
-        print(f"subscribed: {T_START}, {T_SAMPLE}, {T_END}, {T_SCALE_W}", flush=True)
+        client.subscribe([
+            (T_START, 0), (T_SAMPLE, 0), (T_END, 0),
+            (T_SCALE_W, 0), (T_META_SET, 0),
+        ])
+        print(
+            f"subscribed: {T_START}, {T_SAMPLE}, {T_END}, "
+            f"{T_SCALE_W}, {T_META_SET}",
+            flush=True,
+        )
     else:
         print(f"connect failed rc={rc}", flush=True)
+
+
+def apply_metadata(file_basename: str, raw_metadata: dict) -> tuple[bool, str]:
+    """Open the named shot file, merge whitelisted metadata, write back atomically."""
+    cleaned = {k: v for k, v in raw_metadata.items() if k in META_ALLOWED_FIELDS}
+    if not cleaned:
+        return False, "no allowed fields in payload"
+
+    # Keep only this dir — guard against path traversal.
+    safe_name = os.path.basename(file_basename)
+    path = os.path.join(OUT, safe_name)
+    if not os.path.isfile(path):
+        return False, f"file not found: {safe_name}"
+
+    try:
+        with open(path) as f:
+            data = json.load(f)
+    except (OSError, json.JSONDecodeError) as e:
+        return False, f"read failed: {e}"
+
+    existing = data.get("metadata") or {}
+    existing.update(cleaned)
+    data["metadata"] = existing
+
+    tmp = path + ".tmp"
+    with open(tmp, "w") as f:
+        json.dump(data, f, indent=2)
+    os.replace(tmp, path)
+    return True, f"updated {len(cleaned)} field(s)"
 
 
 def on_message(client, userdata, msg):
@@ -166,6 +248,19 @@ def on_message(client, userdata, msg):
         payload = json.loads(msg.payload)
     except json.JSONDecodeError as e:
         print(f"bad json on {msg.topic}: {e}", flush=True)
+        return
+
+    # Metadata edits (bean / grinder / dose / notes) come from the dashboard.
+    if msg.topic == T_META_SET:
+        file_name = payload.get("file")
+        meta = payload.get("metadata") or {}
+        if not file_name or not isinstance(meta, dict):
+            print(f"bad metadata payload: {payload!r}", flush=True)
+            return
+        ok, info = apply_metadata(file_name, meta)
+        print(f"metadata for {file_name}: {info}", flush=True)
+        if ok:
+            rebuild_index()
         return
 
     shot_id = str(payload.get("shot_id", "")).strip()
