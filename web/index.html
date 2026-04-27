@@ -618,7 +618,8 @@ class ShotChart {
     this.cursorDotF.setAttribute('cy', sf);
     this.cursorDotF.setAttribute('opacity', 1);
 
-    $('tt-t').textContent = nearest.t.toFixed(1) + ' s';
+    const tFirstDrop = this.firstDropT() ?? 0;
+    $('tt-t').textContent = (nearest.t - tFirstDrop).toFixed(1) + ' s';
     $('tt-w').textContent = (nearest.w ?? 0).toFixed(1) + ' g';
     $('tt-f').textContent = (nearest.f ?? 0).toFixed(2) + ' g/s';
     tooltip.classList.add('visible');
