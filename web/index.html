@@ -288,7 +288,7 @@
       <div id="weight"><span class="v">—</span><span class="unit">g</span></div>
       <div id="subhero">
         <div><span class="label">elapsed</span><span id="elapsed-v">0.0s</span></div>
-        <div><span class="label">flow</span><span id="flow-v">0.00 g/s</span></div>
+        <div><span class="label" id="flow-label">flow</span><span id="flow-v">0.00 g/s</span></div>
         <div id="stat-pre"><span class="label">preinfusion</span><span id="pre-v">—s</span></div>
         <div id="stat-peak"><span class="label">peak</span><span id="peak-v">— g/s</span></div>
       </div>
@@ -711,6 +711,7 @@ client.on('message', (topic, msg) => {
     setBadge('Extracting', 'extracting');
     displayedWeight = 0; setWeight(0);
     setElapsed(0); setFlow(0);
+    $('flow-label').textContent = 'flow';
     if (p.tank_pct_at_start != null) tankV.textContent = Math.round(p.tank_pct_at_start);
 
     // Prepend the rolling weight buffer so the chart starts at the real
@@ -740,9 +741,12 @@ client.on('message', (topic, msg) => {
       first_drop_at_ms: p.first_drop_at_ms,
     });
     if (p.final_weight_g != null) setWeight(p.final_weight_g);
-    setElapsed(chart.pourTime());
+    const pour = chart.pourTime();
+    setElapsed(pour);
     const peak = chart.peakFlow();
-    setFlow(peak);
+    const avg = pour > 0 ? (p.final_weight_g ?? 0) / pour : 0;
+    $('flow-label').textContent = 'avg';
+    setFlow(avg);
     showStats({ ...p, peak_flow_g_s: peak });
     loadHistory();
   }
@@ -782,9 +786,10 @@ function renderHistory(items) {
     const dt = it.pour_time_s ?? it.duration_s;
     const dur = dt != null ? `${dt.toFixed(1)} s` : '—';
     const wt = it.final_weight_g != null ? `${it.final_weight_g.toFixed(1)}<span class="u">g</span>` : '—';
-    const flow = it.peak_flow_g_s != null ? `${it.peak_flow_g_s.toFixed(2)} g/s peak` : '';
+    const avg = (it.final_weight_g && it.pour_time_s) ? it.final_weight_g / it.pour_time_s : null;
+    const avgStr = avg != null ? `${avg.toFixed(2)} g/s avg` : '';
     const tank = it.tank_pct_at_start != null ? `tank ${Math.round(it.tank_pct_at_start)}%` : '';
-    const meta = [flow, tank].filter(Boolean).join(' · ');
+    const meta = [avgStr, tank].filter(Boolean).join(' · ');
     const sel = it.file === selectedFile ? ' selected' : '';
     return `<div class="row${sel}" data-file="${it.file}">
       <div class="when">${when}</div>
@@ -812,9 +817,12 @@ async function replayShot(file) {
       first_drop_at_ms: shot.first_drop_at_ms,
     });
     setWeight(shot.final_weight_g ?? 0);
-    setElapsed(chart.pourTime());
+    const pour = chart.pourTime();
+    setElapsed(pour);
     const peak = chart.peakFlow();
-    setFlow(peak);
+    const avg = pour > 0 ? (shot.final_weight_g ?? 0) / pour : 0;
+    $('flow-label').textContent = 'avg';
+    setFlow(avg);
     if (shot.tank_pct_at_start != null) tankV.textContent = Math.round(shot.tank_pct_at_start);
     showStats({ ...shot, peak_flow_g_s: peak });
     loadHistory();
@@ -831,6 +839,7 @@ function backToLive() {
   chart.reset();
   setWeight(0); setElapsed(0); setFlow(0);
   weightV.textContent = '—';
+  $('flow-label').textContent = 'flow';
   hideStats();
   setBadge('Idle', 'idle');
   loadHistory();
