@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+  <!-- Portafilter side view, espresso/copper palette to match the dashboard. -->
+  <!-- Wooden handle -->
+  <rect x="20" y="13" width="11" height="5" rx="1.2" fill="#7a4e2c"/>
+  <rect x="20" y="13" width="11" height="1.4" fill="#a06a3e"/>
+  <!-- Collar where handle meets the basket -->
+  <rect x="18.5" y="11.5" width="2.5" height="8" rx="0.6" fill="#5a4030"/>
+  <!-- Basket body (the chrome cup) -->
+  <path d="M2 10 H19 V18 L15 23 H6 L2 18 Z" fill="#d4915c" stroke="#7a4e2c" stroke-width="0.6" stroke-linejoin="round"/>
+  <!-- Highlight along the top of the basket -->
+  <rect x="3" y="10.5" width="15" height="1" fill="#ecaa72"/>
+  <!-- Coffee puck visible at the top -->
+  <ellipse cx="10.5" cy="10" rx="8" ry="1.4" fill="#2a1812"/>
+  <!-- Twin spouts -->
+  <rect x="7.5" y="23" width="2" height="3" rx="0.4" fill="#5a4030"/>
+  <rect x="11.5" y="23" width="2" height="3" rx="0.4" fill="#5a4030"/>
+  <!-- Drip — a single bead of espresso falling -->
+  <ellipse cx="8.5" cy="29" rx="0.7" ry="1.1" fill="#d4915c"/>
+</svg>
