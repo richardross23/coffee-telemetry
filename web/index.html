@@ -263,6 +263,7 @@
     transition: all 0.15s;
   }
   .row-btn:hover { color: var(--copper-bright); border-color: var(--copper); }
+  .row-btn.danger:hover { color: var(--bad); border-color: var(--bad); }
   .row.compare .row-btn[data-action="compare"] { color: var(--warn); border-color: var(--warn); }
   #history-empty { padding: 40px 18px; color: var(--dim); font-size: 12px; text-align: center; font-style: italic; }
 
@@ -1160,6 +1161,7 @@ function renderHistory(items) {
         <button class="row-btn" data-action="compare" title="Overlay this shot on the current chart">${isCompare ? '✕ compare' : '⇄ compare'}</button>
         <button class="row-btn" data-action="edit" title="Edit bean / grinder / dose">✎ edit</button>
         <button class="row-btn" data-action="export" title="Download as Decent .shot JSON (opens in Visualizer)">↓ .shot</button>
+        <button class="row-btn danger" data-action="delete" title="Delete this shot (cannot be undone)">🗑</button>
       </div>
     </div>`;
   }).join('');
@@ -1169,9 +1171,27 @@ function renderHistory(items) {
       if (action === 'compare') { e.stopPropagation(); toggleCompare(r.dataset.file); return; }
       if (action === 'export')  { e.stopPropagation(); exportDecent(r.dataset.file); return; }
       if (action === 'edit')    { e.stopPropagation(); openEdit(r.dataset.file); return; }
+      if (action === 'delete')  { e.stopPropagation(); confirmDelete(r.dataset.file); return; }
       replayShot(r.dataset.file);
     });
   });
+}
+
+function confirmDelete(file) {
+  const row = document.querySelector(`#history-list .row[data-file="${CSS.escape(file)}"]`);
+  const when = row?.querySelector('.when')?.textContent || file;
+  const yield_ = row?.querySelector('.weight-val')?.textContent || '';
+  const summary = yield_ ? `${when} — ${yield_}` : when;
+  if (!confirm(`Delete shot?\n\n${summary}\n\nThis cannot be undone.`)) return;
+
+  // If the deleted shot is currently being replayed (or pinned for compare),
+  // bail back to live so the chart doesn't reference a vanished file.
+  if (selectedFile === file) backToLive();
+  if (compareFile === file) toggleCompare(file);
+
+  client.publish('coffee/shot/delete', JSON.stringify({ file }));
+  // Logger needs a tick to remove + rebuild
+  setTimeout(loadHistory, 400);
 }
 
 function escapeHtml(s) {

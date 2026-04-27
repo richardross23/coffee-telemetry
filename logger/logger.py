@@ -33,6 +33,7 @@ T_SAMPLE = "coffee/shot/sample"
 T_END = "coffee/shot/end"
 T_SCALE_W = "coffee/scale/weight"
 T_META_SET = "coffee/shot/metadata/set"
+T_DELETE = "coffee/shot/delete"
 
 # Whitelist of fields the dashboard is allowed to set on a shot via MQTT.
 # Anything else in the payload is ignored.
@@ -207,15 +208,31 @@ def on_connect(client, userdata, flags, rc, properties=None):
         print(f"connected to {BROKER}:{PORT}", flush=True)
         client.subscribe([
             (T_START, 0), (T_SAMPLE, 0), (T_END, 0),
-            (T_SCALE_W, 0), (T_META_SET, 0),
+            (T_SCALE_W, 0), (T_META_SET, 0), (T_DELETE, 0),
         ])
         print(
             f"subscribed: {T_START}, {T_SAMPLE}, {T_END}, "
-            f"{T_SCALE_W}, {T_META_SET}",
+            f"{T_SCALE_W}, {T_META_SET}, {T_DELETE}",
             flush=True,
         )
     else:
         print(f"connect failed rc={rc}", flush=True)
+
+
+def delete_shot(file_basename: str) -> tuple[bool, str]:
+    """Remove a saved shot file. Validates against path traversal and the
+    reserved index.json filename."""
+    safe_name = os.path.basename(file_basename)
+    if not safe_name or safe_name == INDEX:
+        return False, "invalid filename"
+    path = os.path.join(OUT, safe_name)
+    if not os.path.isfile(path):
+        return False, f"not found: {safe_name}"
+    try:
+        os.remove(path)
+    except OSError as e:
+        return False, f"remove failed: {e}"
+    return True, f"deleted {safe_name}"
 
 
 def apply_metadata(file_basename: str, raw_metadata: dict) -> tuple[bool, str]:
@@ -278,6 +295,18 @@ def on_message(client, userdata, msg):
             return
         ok, info = apply_metadata(file_name, meta)
         print(f"metadata for {file_name}: {info}", flush=True)
+        if ok:
+            rebuild_index()
+        return
+
+    # Shot deletion. Browser confirms with the user before publishing.
+    if msg.topic == T_DELETE:
+        file_name = payload.get("file")
+        if not file_name:
+            print(f"bad delete payload: {payload!r}", flush=True)
+            return
+        ok, info = delete_shot(file_name)
+        print(f"delete: {info}", flush=True)
         if ok:
             rebuild_index()
         return
