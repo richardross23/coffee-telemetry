@@ -44,6 +44,12 @@ META_ALLOWED_FIELDS = frozenset({
     "notes",
 })
 
+# Fields that should NEVER auto-inherit from the previous shot. Bean /
+# grinder / dose carry forward (rarely change between back-to-back shots),
+# but notes are per-shot tasting commentary and would be misleading if
+# reused.
+META_INHERIT_EXCLUDE = frozenset({"notes"})
+
 INDEX = "index.json"
 FILENAME_TS_RE = re.compile(r"^(\d{8}T\d{6}Z)_")
 
@@ -99,8 +105,9 @@ def parse_ts(filename: str) -> str:
 
 def latest_metadata() -> dict:
     """Read the most recent saved shot's metadata for auto-inheriting onto
-    the next shot. Returns an empty dict if no prior shots exist or none
-    have any metadata."""
+    the next shot. Excludes META_INHERIT_EXCLUDE (notes etc.) so per-shot
+    commentary doesn't get reused. Returns an empty dict if no prior
+    shots exist or none have inheritable metadata."""
     paths = sorted(glob.glob(os.path.join(OUT, "*.json")), reverse=True)
     for path in paths:
         if os.path.basename(path) == INDEX:
@@ -111,8 +118,12 @@ def latest_metadata() -> dict:
         except (OSError, json.JSONDecodeError):
             continue
         meta = data.get("metadata") or {}
-        if meta:
-            return {k: v for k, v in meta.items() if k in META_ALLOWED_FIELDS}
+        inheritable = {
+            k: v for k, v in meta.items()
+            if k in META_ALLOWED_FIELDS and k not in META_INHERIT_EXCLUDE
+        }
+        if inheritable:
+            return inheritable
     return {}
 
 
