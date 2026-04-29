@@ -46,6 +46,10 @@ MAX_GAP_SEC = 300
 # Espresso-relevant ground weight range. Anything outside this is likely
 # a purge / cleanup grind.
 GROUND_RANGE_G = (15.0, 25.0)
+# If two grinds happen within this window, the earlier one was almost
+# certainly tossed and re-done (bad dose, jam recovery, hopper top-up,
+# WDT mishap). Keep only the later grind for matching.
+REGRIND_DEDUP_SEC = 120
 
 LINE_RE = re.compile(
     r"""^\s*Info\s*,\s*
@@ -71,6 +75,16 @@ class GrindEvent:
 
 
 @dataclass
+class ParseStats:
+    total_lines: int = 0
+    parsed: int = 0
+    skipped_unparseable: int = 0      # didn't match the regex (truncated / malformed)
+    skipped_zero_weight: int = 0      # 0.0g actual — empty hopper / cup off scale
+    skipped_overshoot: int = 0        # >25g actual — clog, flush, severe overgrind
+    long_duration: int = 0            # parsed AND in range, but duration > 8s (jam / labour)
+
+
+@dataclass
 class ShotFile:
     path: Path
     saved_at_utc: datetime.datetime
@@ -78,27 +92,64 @@ class ShotFile:
     has_grind_metadata: bool
 
 
-def parse_log(text: str, tz_name: str) -> list[GrindEvent]:
+def parse_log(text: str, tz_name: str) -> tuple[list[GrindEvent], ParseStats]:
     tz = ZoneInfo(tz_name)
-    events = []
+    events: list[GrindEvent] = []
+    stats = ParseStats()
     for line in text.splitlines():
+        if not line.strip():
+            continue
+        stats.total_lines += 1
         m = LINE_RE.match(line)
         if not m:
+            stats.skipped_unparseable += 1
             continue
         if m.group("state") != "ground":
             continue
         actual = float(m.group("actual"))
-        if not (GROUND_RANGE_G[0] <= actual <= GROUND_RANGE_G[1]):
+        if actual == 0.0:
+            stats.skipped_zero_weight += 1
+            continue
+        if actual > GROUND_RANGE_G[1]:
+            stats.skipped_overshoot += 1
+            continue
+        if actual < GROUND_RANGE_G[0]:
+            # quietly drop sub-15g actuals — purges, not espresso doses
             continue
         ts_local = datetime.datetime.strptime(m.group("ts"), "%Y/%m/%d %H:%M:%S").replace(tzinfo=tz)
+        duration = float(m.group("duration"))
+        if duration > 8.0:
+            stats.long_duration += 1
         events.append(GrindEvent(
             ts_utc=ts_local.astimezone(datetime.timezone.utc),
             recipe=int(m.group("recipe")),
             target_g=float(m.group("target")),
             actual_g=actual,
-            duration_s=float(m.group("duration")),
+            duration_s=duration,
         ))
-    return events
+        stats.parsed += 1
+    return events, stats
+
+
+def dedup_regrinds(events: list[GrindEvent], gap_sec: int) -> tuple[list[GrindEvent], list[GrindEvent]]:
+    """Drop earlier events when another grind follows within `gap_sec`.
+
+    Real-world workflow: bad dose / jam / WDT mishap leads to tossing the
+    first grind and immediately re-grinding. The LATER event represents the
+    dose actually used, so it should be the one matched to the next shot.
+
+    Returns (kept, dropped) — both sorted by timestamp.
+    """
+    sorted_events = sorted(events, key=lambda e: e.ts_utc)
+    kept: list[GrindEvent] = []
+    dropped: list[GrindEvent] = []
+    for i, e in enumerate(sorted_events):
+        next_e = sorted_events[i + 1] if i + 1 < len(sorted_events) else None
+        if next_e and (next_e.ts_utc - e.ts_utc).total_seconds() <= gap_sec:
+            dropped.append(e)
+        else:
+            kept.append(e)
+    return kept, dropped
 
 
 def load_shots(shots_dir: Path) -> list[ShotFile]:
@@ -185,7 +236,7 @@ def main() -> int:
             print("paste log lines, then Ctrl-D:", file=sys.stderr)
         text = sys.stdin.read()
 
-    events = parse_log(text, args.tz)
+    events, stats = parse_log(text, args.tz)
     if not events:
         print("no parseable 'ground' rows in input", file=sys.stderr)
         return 1
@@ -194,9 +245,27 @@ def main() -> int:
         print(f"no shot files under {args.shots_dir}", file=sys.stderr)
         return 1
 
+    events, regrinds_dropped = dedup_regrinds(events, REGRIND_DEDUP_SEC)
+
+    # Anomaly summary up front so the user can sanity-check the parse.
+    print(f"\n--- parse summary ---")
+    print(f"  log lines read:          {stats.total_lines}")
+    print(f"  parsed grinds (dosed):   {stats.parsed}")
+    print(f"  dropped: 0g actual:      {stats.skipped_zero_weight}  (empty hopper / cup off scale)")
+    print(f"  dropped: >25g actual:    {stats.skipped_overshoot}  (clog / flush / severe overgrind)")
+    print(f"  dropped: unparseable:    {stats.skipped_unparseable}  (truncated 'ground, 0.000s' lines etc.)")
+    print(f"  long-duration (>8s):     {stats.long_duration}  (jam / motor labour — kept but flagged)")
+    if regrinds_dropped:
+        print(f"  dropped as re-grinds:    {len(regrinds_dropped)}  (within {REGRIND_DEDUP_SEC}s of a later grind)")
+        for g in regrinds_dropped:
+            print(f"    · {fmt_local(g.ts_utc, args.tz)}  recipe {g.recipe}  {g.actual_g:.1f}g in {g.duration_s:.2f}s")
+    recipes = sorted({g.recipe for g in events})
+    if len(recipes) > 1:
+        print(f"  recipes used:            {recipes}")
+
     matches, unmatched_g, unmatched_s = match(events, shots)
 
-    print(f"\n{len(events)} grind event(s) parsed, {len(shots)} shot(s) on disk\n")
+    print(f"\n{len(events)} grind event(s) for matching, {len(shots)} shot(s) on disk\n")
     print(f"--- {len(matches)} match(es) ---")
     for g, s, gap in matches:
         skip = " [SKIP — already has grind metadata, use --force]" if s.has_grind_metadata and not args.force else ""
