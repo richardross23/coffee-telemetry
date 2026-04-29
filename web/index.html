@@ -1011,7 +1011,16 @@ function setShotInfo(meta, savedAtIso) {
   const parts = [];
   const bean = [meta.bean_brand, meta.bean_type].filter(Boolean).join(' · ');
   if (bean) parts.push(`<span class="bean">${escapeHtml(bean)}</span>`);
-  if (meta.bean_weight_g != null) parts.push(`<span class="dose">${(+meta.bean_weight_g).toFixed(1)}g dose</span>`);
+  // Prefer actual ground weight (from the grinder log) over the manual
+  // dose entry; fall back to bean_weight_g when no grind data is attached.
+  const dose = meta.ground_weight_g ?? meta.bean_weight_g;
+  if (dose != null) {
+    const label = meta.ground_weight_g != null ? 'g ground' : 'g dose';
+    parts.push(`<span class="dose">${(+dose).toFixed(1)}${label}</span>`);
+  }
+  if (meta.grind_duration_s != null) {
+    parts.push(`<span class="grind">${(+meta.grind_duration_s).toFixed(2)}s grind</span>`);
+  }
   if (meta.grinder_setting) parts.push(`<span class="grind">${escapeHtml(meta.grinder_setting)}</span>`);
   if (meta.roast_date) {
     const ref = savedAtIso ? new Date(savedAtIso) : new Date();
@@ -1159,6 +1168,12 @@ function renderHistory(items) {
     const meta2parts = [];
     if (it.bean_label) meta2parts.push(`<span>${escapeHtml(it.bean_label)}</span>`);
     if (it.brew_ratio_str) meta2parts.push(`<span class="ratio">${it.brew_ratio_str}</span>`);
+    // Prefer ground_weight_g (from grinder log) for the row's dose chip.
+    const rowDose = it.metadata?.ground_weight_g ?? it.metadata?.bean_weight_g;
+    if (rowDose != null) {
+      const lbl = it.metadata?.ground_weight_g != null ? 'g ground' : 'g';
+      meta2parts.push(`<span class="grind">${(+rowDose).toFixed(1)}${lbl}</span>`);
+    }
     if (it.metadata?.grinder_setting) meta2parts.push(`<span class="grind">${escapeHtml(it.metadata.grinder_setting)}</span>`);
     if (it.days_off_roast != null) meta2parts.push(`<span class="roast">${it.days_off_roast}d off roast</span>`);
     const metaLine = meta2parts.length ? `<div class="meta-line">${meta2parts.join(' · ')}</div>` : '';

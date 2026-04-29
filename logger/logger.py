@@ -41,14 +41,20 @@ META_ALLOWED_FIELDS = frozenset({
     "bean_brand", "bean_type", "roast_date", "roast_level",
     "bean_weight_g",
     "grinder_model", "grinder_setting",
+    # Grinder log import (tools/import_grinder_log.py): the actual ground
+    # weight is more accurate than the user's manual bean_weight_g entry.
+    "ground_weight_g", "grind_duration_s", "grinder_recipe",
     "notes",
 })
 
 # Fields that should NEVER auto-inherit from the previous shot. Bean /
-# grinder / dose carry forward (rarely change between back-to-back shots),
-# but notes are per-shot tasting commentary and would be misleading if
-# reused.
-META_INHERIT_EXCLUDE = frozenset({"notes"})
+# grinder / dose carry forward (rarely change between back-to-back shots);
+# notes are per-shot commentary; ground_weight / grind_duration / recipe
+# are unique per grinder event and don't make sense to reuse.
+META_INHERIT_EXCLUDE = frozenset({
+    "notes",
+    "ground_weight_g", "grind_duration_s", "grinder_recipe",
+})
 
 INDEX = "index.json"
 FILENAME_TS_RE = re.compile(r"^(\d{8}T\d{6}Z)_")
@@ -149,7 +155,9 @@ def derive_metadata_summary(meta: dict, saved_at_iso: str | None, final_weight_g
     - bean_label: 'Industry Beans · Yirgacheffe' (or whichever side is filled)
     """
     out = {}
-    dose = meta.get("bean_weight_g")
+    # Ground weight from the grinder is more accurate than the manual dose
+    # entry — use it for brew_ratio when present.
+    dose = meta.get("ground_weight_g") or meta.get("bean_weight_g")
     if dose and final_weight_g and dose > 0:
         out["brew_ratio_str"] = f"1:{(final_weight_g / dose):.2f}"
 
