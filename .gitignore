@@ -2,3 +2,5 @@ mosquitto/data/
 mosquitto/log/
 shots/*.json
 .DS_Store
+tools/fram.bin
+tools/*.bin
