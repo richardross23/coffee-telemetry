@@ -165,11 +165,11 @@
   #tooltip .v.flow { color: var(--cream); }
   #tooltip .v.t { color: var(--fg); }
 
-  #subhero #stat-pre, #subhero #stat-peak, #subhero #stat-ratio {
+  #subhero #stat-dwell, #subhero #stat-peak, #subhero #stat-ratio {
     opacity: 0; transform: translateY(-4px);
     transition: opacity 0.3s 0.05s, transform 0.3s 0.05s;
   }
-  #subhero #stat-pre.visible, #subhero #stat-peak.visible, #subhero #stat-ratio.visible {
+  #subhero #stat-dwell.visible, #subhero #stat-peak.visible, #subhero #stat-ratio.visible {
     opacity: 1; transform: translateY(0);
   }
 
@@ -397,7 +397,7 @@
         <div><span class="label">elapsed</span><span id="elapsed-v">0.0s</span></div>
         <div><span class="label" id="flow-label">flow</span><span id="flow-v">0.00 g/s</span></div>
         <div id="stat-ratio"><span class="label">ratio</span><span id="ratio-v">—</span></div>
-        <div id="stat-pre"><span class="label">preinfusion</span><span id="pre-v">—s</span></div>
+        <div id="stat-dwell"><span class="label">dwell</span><span id="dwell-v">—s</span></div>
         <div id="stat-peak"><span class="label">peak</span><span id="peak-v">— g/s</span></div>
       </div>
       <div id="shotinfo"></div>
@@ -427,6 +427,7 @@
         <rect class="preinfusion-band" fill="rgba(212, 145, 92, 0.06)" stroke="rgba(212, 145, 92, 0.18)" stroke-dasharray="2 4" stroke-width="1" x="0" y="0" width="0" height="100%"/>
         <rect class="extraction-band" fill="rgba(143, 188, 122, 0.04)" x="0" y="0" width="0" height="100%"/>
         <rect class="decline-band" fill="rgba(232, 178, 96, 0.05)" x="0" y="0" width="0" height="100%"/>
+        <line class="pump-on-mark" stroke="var(--copper)" stroke-width="1" stroke-dasharray="1 3" opacity="0" x1="0" x2="0" y1="0" y2="100%"/>
         <line class="first-drop" stroke="var(--copper)" stroke-width="1" stroke-dasharray="3 3" opacity="0" x1="0" x2="0" y1="0" y2="100%"/>
         <line class="decline-mark" stroke="var(--warn)" stroke-width="1" stroke-dasharray="3 3" opacity="0" x1="0" x2="0" y1="0" y2="100%"/>
         <path class="weight-fill" fill="url(#weight-grad)" d=""/>
@@ -503,16 +504,17 @@ const mainEl = $('main');
 const historyList = $('history-list');
 const heroEl = $('hero');
 const tooltip = $('tooltip');
-const statPre = $('stat-pre');
+const statDwell = $('stat-dwell');
 const statPeak = $('stat-peak');
 const statRatio = $('stat-ratio');
-const preV = $('pre-v');
+const dwellV = $('dwell-v');
 const peakV = $('peak-v');
 const ratioV = $('ratio-v');
 
 let mode = 'live';
 let activeShotId = null;
 let selectedFile = null;
+let liveDwellSec = null;  // captured from coffee/shot/start; rendered on shot/end
 
 // Rolling buffer of always-on weight samples (Acaia stream).
 // Used to prepend the chart at shot/start so we see the *real* first drops
@@ -579,6 +581,7 @@ class ShotChart {
     this.extractBand = svg.querySelector('.extraction-band');
     this.declineBand = svg.querySelector('.decline-band');
     this.firstDrop = svg.querySelector('.first-drop');
+    this.pumpOnMark = svg.querySelector('.pump-on-mark');
     this.declineMark = svg.querySelector('.decline-mark');
     this.weightFill = svg.querySelector('.weight-fill');
     this.weightCurve = svg.querySelector('.weight-curve');
@@ -778,6 +781,7 @@ class ShotChart {
       this.extractBand.setAttribute('width', 0);
       this.declineBand.setAttribute('width', 0);
       this.firstDrop.setAttribute('opacity', 0);
+      this.pumpOnMark.setAttribute('opacity', 0);
       this.declineMark.setAttribute('opacity', 0);
       return;
     }
@@ -825,32 +829,34 @@ class ShotChart {
     const tDeclineStart = this.declineStartT();
     const tLast = this.samples.at(-1).t;
     const tLeft = this.samples[0].t;
+    // Pump-on, when known, is dwell_s seconds before first-drop. Anchor
+    // the dwell band to it; otherwise the band falls back to the
+    // chart's leftmost edge (legacy behaviour for shots without dwell data).
+    const dwellS = this.meta.dwell_s;
+    const tPumpOn = (dwellS != null && dwellS > 0 && tFirstDrop != null)
+      ? tFirstDrop - dwellS
+      : null;
+    const tBandStart = tPumpOn ?? tLeft;
 
-    setRect(this.preBand, tLeft, tFirstDrop);
+    setRect(this.preBand, tBandStart, tFirstDrop);
     setRect(this.extractBand, tFirstDrop, tDeclineStart ?? tLast);
     setRect(this.declineBand, tDeclineStart, tLast);
 
-    if (tFirstDrop != null) {
-      const px = this.xScale(tFirstDrop);
-      this.firstDrop.setAttribute('x1', px);
-      this.firstDrop.setAttribute('x2', px);
-      this.firstDrop.setAttribute('y1', yTop);
-      this.firstDrop.setAttribute('y2', this.H - this.pad.b);
-      this.firstDrop.setAttribute('opacity', 0.55);
-    } else {
-      this.firstDrop.setAttribute('opacity', 0);
-    }
-
-    if (tDeclineStart != null) {
-      const px = this.xScale(tDeclineStart);
-      this.declineMark.setAttribute('x1', px);
-      this.declineMark.setAttribute('x2', px);
-      this.declineMark.setAttribute('y1', yTop);
-      this.declineMark.setAttribute('y2', this.H - this.pad.b);
-      this.declineMark.setAttribute('opacity', 0.55);
-    } else {
-      this.declineMark.setAttribute('opacity', 0);
-    }
+    const setVerticalLine = (line, t) => {
+      if (t == null) {
+        line.setAttribute('opacity', 0);
+        return;
+      }
+      const px = this.xScale(t);
+      line.setAttribute('x1', px);
+      line.setAttribute('x2', px);
+      line.setAttribute('y1', yTop);
+      line.setAttribute('y2', this.H - this.pad.b);
+      line.setAttribute('opacity', 0.55);
+    };
+    setVerticalLine(this.pumpOnMark, tPumpOn);
+    setVerticalLine(this.firstDrop, tFirstDrop);
+    setVerticalLine(this.declineMark, tDeclineStart);
   }
 
   _renderCompare() {
@@ -985,7 +991,16 @@ function setBadge(text, cls) {
 
 // ---------- shot-end stats (inline in subhero) ----------
 function showStats(p) {
-  preV.textContent = (p.preinfusion_s != null ? p.preinfusion_s.toFixed(1) : '—') + 's';
+  // dwell = pump-on → first-drop (firmware-measured). 0 / null / missing
+  // means "not measurable" — show — instead of a misleading 0s.
+  if (p.dwell_s != null && p.dwell_s > 0) {
+    dwellV.textContent = p.dwell_s.toFixed(1) + 's';
+    // > 15 s = almost certainly a stale pump_on detection on a noisy mount
+    dwellV.style.color = (p.dwell_s > 15 || p.dwell_suspect) ? 'var(--bad)' : '';
+  } else {
+    dwellV.textContent = '—';
+    dwellV.style.color = '';
+  }
   peakV.textContent = (p.peak_flow_g_s != null ? p.peak_flow_g_s.toFixed(2) : '—') + ' g/s';
   if (p.brew_ratio_str) {
     ratioV.textContent = p.brew_ratio_str;
@@ -993,11 +1008,11 @@ function showStats(p) {
   } else {
     statRatio.classList.remove('visible');
   }
-  statPre.classList.add('visible');
+  statDwell.classList.add('visible');
   statPeak.classList.add('visible');
 }
 function hideStats() {
-  statPre.classList.remove('visible');
+  statDwell.classList.remove('visible');
   statPeak.classList.remove('visible');
   statRatio.classList.remove('visible');
 }
@@ -1086,6 +1101,10 @@ client.on('message', (topic, msg) => {
     setShotInfo(loadSticky());
     if (p.tank_pct_at_start != null) tankV.textContent = Math.round(p.tank_pct_at_start);
 
+    // dwell_ms = pump-on → first-drop, firmware-measured. 0 / missing
+    // means pump-detect didn't see lever-up before first drop.
+    liveDwellSec = (p.dwell_ms && p.dwell_ms > 0) ? p.dwell_ms / 1000 : null;
+
     // Prepend the rolling weight buffer so the chart starts at the real
     // first drop, not at the firmware's >1g detection trigger. Drop any
     // sample where |weight| exceeds PREPEND_MAX_WEIGHT_G — that's the
@@ -1095,7 +1114,7 @@ client.on('message', (topic, msg) => {
     const prepend = scaleBuffer
       .filter(e => e.ts >= cutoff && Math.abs(e.w) <= PREPEND_MAX_WEIGHT_G)
       .map(e => ({ t: (e.ts - startWall) / 1000, w: e.w, f: 0 }));
-    chart.setShot(prepend, {});
+    chart.setShot(prepend, { dwell_s: liveDwellSec });
   } else if (topic === 'coffee/shot/sample') {
     if (activeShotId == null) {
       activeShotId = p.shot_id;
@@ -1111,7 +1130,7 @@ client.on('message', (topic, msg) => {
     activeShotId = null;
     setBadge('Done', 'done');
     chart.setMeta({
-      preinfusion_s: p.preinfusion_s,
+      dwell_s: liveDwellSec,
       first_drop_at_ms: p.first_drop_at_ms,
     });
     if (p.final_weight_g != null) setWeight(p.final_weight_g);
@@ -1126,7 +1145,13 @@ client.on('message', (topic, msg) => {
     const dose = parseFloat(sticky.bean_weight_g);
     const ratioStr = (Number.isFinite(dose) && dose > 0 && p.final_weight_g)
       ? `1:${(p.final_weight_g / dose).toFixed(2)}` : null;
-    showStats({ ...p, peak_flow_g_s: peak, brew_ratio_str: ratioStr });
+    showStats({
+      ...p,
+      peak_flow_g_s: peak,
+      brew_ratio_str: ratioStr,
+      dwell_s: liveDwellSec,
+      dwell_suspect: liveDwellSec != null && liveDwellSec > 15,
+    });
     loadHistory();
   }
 });
@@ -1427,7 +1452,7 @@ async function replayShot(file) {
 
     const samples = (shot.samples || []).map(s => ({ t: (s.t_ms ?? 0)/1000, w: s.weight_g, f: s.flow_g_s }));
     chart.setShot(samples, {
-      preinfusion_s: shot.preinfusion_s,
+      dwell_s: shot.dwell_s,
       first_drop_at_ms: shot.first_drop_at_ms,
     });
     setWeight(shot.final_weight_g ?? 0);

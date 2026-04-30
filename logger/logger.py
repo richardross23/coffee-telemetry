@@ -213,6 +213,8 @@ def rebuild_index() -> None:
             "shot_id": data.get("shot_id"),
             "duration_s": data.get("duration_s"),
             "pour_time_s": pour_time_s,
+            "dwell_s": data.get("dwell_s"),
+            "dwell_suspect": data.get("dwell_suspect", False),
             "final_weight_g": data.get("final_weight_g"),
             "peak_flow_g_s": data.get("peak_flow_g_s"),
             "tank_pct_at_start": data.get("tank_pct_at_start"),
@@ -353,12 +355,18 @@ def on_message(client, userdata, msg):
             for ts, w in scale_buffer
             if ts >= cutoff and abs(w) <= PREPEND_MAX_WEIGHT_G
         ]
+        # dwell_ms = pump-on → first-drop (firmware reports it on shot/start
+        # since v3.x). 0 means pump-detect didn't see lever-up in time;
+        # treat as "no measurement".
+        dwell_ms = payload.get("dwell_ms")
         shots_in_flight[shot_id] = {
             "start": payload,
             "samples": [],
             "prepend": prepend,
+            "dwell_ms": dwell_ms if dwell_ms else None,
         }
-        print(f"shot {shot_id} started ({len(prepend)} prepend samples)", flush=True)
+        dwell_str = f", dwell {dwell_ms}ms" if dwell_ms else ""
+        print(f"shot {shot_id} started ({len(prepend)} prepend samples{dwell_str})", flush=True)
 
     elif msg.topic == T_SAMPLE:
         shots_in_flight[shot_id]["samples"].append({
@@ -369,12 +377,22 @@ def on_message(client, userdata, msg):
 
     elif msg.topic == T_END:
         buf = shots_in_flight.pop(
-            shot_id, {"start": None, "samples": [], "prepend": []}
+            shot_id, {"start": None, "samples": [], "prepend": [], "dwell_ms": None}
         )
         record = dict(payload)
         record.setdefault("samples", buf["prepend"] + buf["samples"])
         if buf["start"] and "tank_pct_at_start" not in record:
             record["tank_pct_at_start"] = buf["start"].get("tank_pct_at_start")
+
+        # Carry dwell info from shot/start onto the saved record, in
+        # seconds for consistency with pour_time_s etc. Anything > 15s is
+        # almost certainly a stale pump_on detection (mounted-too-loose
+        # threshold) — flag it so the dashboard can render in warn colour.
+        dwell_ms = buf.get("dwell_ms")
+        if dwell_ms:
+            record["dwell_s"] = dwell_ms / 1000.0
+            if dwell_ms > 15000:
+                record["dwell_suspect"] = True
 
         is_tare, reason = looks_like_tare(record)
         if is_tare:
