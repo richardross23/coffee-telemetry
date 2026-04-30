@@ -519,6 +519,10 @@ let selectedFile = null;
 // (the firmware's shot detector requires weight>1g, missing the lead-in).
 const SCALE_BUFFER_MS = 30000;
 const PREPEND_LOOKBACK_MS = 10000;
+// Real first-drop weight stays under a couple grams in the prepend window;
+// anything above this is cup placement / tare spike caught incidentally by
+// the always-on weight stream and should be dropped.
+const PREPEND_MAX_WEIGHT_G = 5;
 const scaleBuffer = []; // {ts: epoch_ms, w: number}
 function pushScale(w) {
   if (!Number.isFinite(w)) return;
@@ -1083,11 +1087,13 @@ client.on('message', (topic, msg) => {
     if (p.tank_pct_at_start != null) tankV.textContent = Math.round(p.tank_pct_at_start);
 
     // Prepend the rolling weight buffer so the chart starts at the real
-    // first drop, not at the firmware's >1g detection trigger.
+    // first drop, not at the firmware's >1g detection trigger. Drop any
+    // sample where |weight| exceeds PREPEND_MAX_WEIGHT_G — that's the
+    // cup-placement / tare spike, not a real drip.
     const startWall = Date.now();
     const cutoff = startWall - PREPEND_LOOKBACK_MS;
     const prepend = scaleBuffer
-      .filter(e => e.ts >= cutoff)
+      .filter(e => e.ts >= cutoff && Math.abs(e.w) <= PREPEND_MAX_WEIGHT_G)
       .map(e => ({ t: (e.ts - startWall) / 1000, w: e.w, f: 0 }));
     chart.setShot(prepend, {});
   } else if (topic === 'coffee/shot/sample') {

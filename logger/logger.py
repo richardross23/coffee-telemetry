@@ -61,6 +61,11 @@ FILENAME_TS_RE = re.compile(r"^(\d{8}T\d{6}Z)_")
 
 SCALE_BUFFER_SEC = 30.0
 PREPEND_LOOKBACK_SEC = 10.0
+# Within the prepend lookback window, real first-drop weight should never
+# exceed a few grams. If we see anything heavier it's the user placing the
+# cup on the scale (40-200g) before taring — drop those samples so the
+# tare spike doesn't pollute the saved curve or the first-drop detection.
+PREPEND_MAX_WEIGHT_G = 5.0
 
 # Tare-event filter — the firmware fires shot/start on weight delta,
 # so taring the scale (or fiddling with the cup) currently produces
@@ -338,12 +343,15 @@ def on_message(client, userdata, msg):
     if msg.topic == T_START:
         # Capture the rolling-buffer prepend at trigger time; store with
         # negative t_ms so it slots in before the live samples.
+        # Skip any sample where |weight| exceeds the espresso first-drop
+        # range — that's almost certainly cup placement or tare events
+        # captured incidentally by the always-on weight stream.
         start_wall = time.time()
         cutoff = start_wall - PREPEND_LOOKBACK_SEC
         prepend = [
             {"t_ms": int((ts - start_wall) * 1000), "weight_g": w, "flow_g_s": 0.0}
             for ts, w in scale_buffer
-            if ts >= cutoff
+            if ts >= cutoff and abs(w) <= PREPEND_MAX_WEIGHT_G
         ]
         shots_in_flight[shot_id] = {
             "start": payload,
