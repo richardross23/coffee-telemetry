@@ -200,11 +200,17 @@ def rebuild_index() -> None:
         samples = data.get("samples") or []
         first_t = first_drop_t_ms(samples)
         last_t = samples[-1].get("t_ms") if samples else None
-        pour_time_s = (
-            (last_t - first_t) / 1000.0
-            if first_t is not None and last_t is not None
-            else None
-        )
+        # Pour-time end-point: prefer Acaia's auto-stop event over the
+        # last-sample fallback. Acaia's algorithm is more authoritative
+        # than our 'first_drop → last sample' heuristic — it knows the
+        # difference between dribbles and a finished shot.
+        acaia_stop_s = data.get("acaia_stop_at_s")
+        if acaia_stop_s is not None and first_t is not None:
+            pour_time_s = acaia_stop_s - (first_t / 1000.0)
+        elif first_t is not None and last_t is not None:
+            pour_time_s = (last_t - first_t) / 1000.0
+        else:
+            pour_time_s = None
         meta = data.get("metadata") or {}
         saved_at = parse_ts(name)
         entry = {
@@ -215,6 +221,9 @@ def rebuild_index() -> None:
             "pour_time_s": pour_time_s,
             "dwell_s": data.get("dwell_s"),
             "dwell_suspect": data.get("dwell_suspect", False),
+            "acaia_start_at_s": data.get("acaia_start_at_s"),
+            "acaia_stop_at_s": data.get("acaia_stop_at_s"),
+            "acaia_stop_weight_g": data.get("acaia_stop_weight_g"),
             "final_weight_g": data.get("final_weight_g"),
             "peak_flow_g_s": data.get("peak_flow_g_s"),
             "tank_pct_at_start": data.get("tank_pct_at_start"),
@@ -393,6 +402,21 @@ def on_message(client, userdata, msg):
             record["dwell_s"] = dwell_ms / 1000.0
             if dwell_ms > 15000:
                 record["dwell_suspect"] = True
+
+        # Acaia button events relayed by firmware. Convert ms → seconds so
+        # they sit alongside pour_time_s / dwell_s naturally. Fields are
+        # absent if the corresponding BLE event didn't fire during the
+        # shot window — leave them out of the saved record entirely.
+        for src, dst in (
+            ("acaia_start_at_ms", "acaia_start_at_s"),
+            ("acaia_stop_at_ms", "acaia_stop_at_s"),
+        ):
+            v = payload.get(src)
+            if v is not None:
+                record[dst] = v / 1000.0
+                # Don't keep the duplicate ms field in the saved record
+                record.pop(src, None)
+        # Weights pass through as-is.
 
         is_tare, reason = looks_like_tare(record)
         if is_tare:

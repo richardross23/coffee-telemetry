@@ -430,6 +430,7 @@
         <line class="pump-on-mark" stroke="var(--copper)" stroke-width="1" stroke-dasharray="1 3" opacity="0" x1="0" x2="0" y1="0" y2="100%"/>
         <line class="first-drop" stroke="var(--copper)" stroke-width="1" stroke-dasharray="3 3" opacity="0" x1="0" x2="0" y1="0" y2="100%"/>
         <line class="decline-mark" stroke="var(--warn)" stroke-width="1" stroke-dasharray="3 3" opacity="0" x1="0" x2="0" y1="0" y2="100%"/>
+        <line class="acaia-stop-mark" stroke="var(--cream)" stroke-width="1.4" stroke-dasharray="4 2" opacity="0" x1="0" x2="0" y1="0" y2="100%"/>
         <path class="weight-fill" fill="url(#weight-grad)" d=""/>
         <path class="compare-weight" fill="none" stroke="var(--fg-2)" stroke-width="1.5" stroke-linejoin="round" stroke-linecap="round" opacity="0.35" stroke-dasharray="4 3" d=""/>
         <path class="compare-flow" fill="none" stroke="var(--fg-2)" stroke-width="1" stroke-linejoin="round" stroke-linecap="round" opacity="0.25" stroke-dasharray="2 3" d=""/>
@@ -583,6 +584,7 @@ class ShotChart {
     this.firstDrop = svg.querySelector('.first-drop');
     this.pumpOnMark = svg.querySelector('.pump-on-mark');
     this.declineMark = svg.querySelector('.decline-mark');
+    this.acaiaStopMark = svg.querySelector('.acaia-stop-mark');
     this.weightFill = svg.querySelector('.weight-fill');
     this.weightCurve = svg.querySelector('.weight-curve');
     this.flowCurve = svg.querySelector('.flow-curve');
@@ -783,6 +785,7 @@ class ShotChart {
       this.firstDrop.setAttribute('opacity', 0);
       this.pumpOnMark.setAttribute('opacity', 0);
       this.declineMark.setAttribute('opacity', 0);
+      this.acaiaStopMark.setAttribute('opacity', 0);
       return;
     }
 
@@ -857,6 +860,10 @@ class ShotChart {
     setVerticalLine(this.pumpOnMark, tPumpOn);
     setVerticalLine(this.firstDrop, tFirstDrop);
     setVerticalLine(this.declineMark, tDeclineStart);
+    // Acaia auto-stop event time is in shot/start frame, same as samples'
+    // s.t — render directly. Cream colour distinguishes it from the
+    // copper/warn markers (it's the scale's voice, not ours).
+    setVerticalLine(this.acaiaStopMark, this.meta.acaia_stop_at_s ?? null);
   }
 
   _renderCompare() {
@@ -1129,9 +1136,13 @@ client.on('message', (topic, msg) => {
   } else if (topic === 'coffee/shot/end') {
     activeShotId = null;
     setBadge('Done', 'done');
+    // Convert Acaia stop ms → seconds inline (firmware sends ms, we
+    // store seconds throughout the rest of the pipeline).
+    const acaiaStopAtS = (p.acaia_stop_at_ms != null) ? p.acaia_stop_at_ms / 1000 : null;
     chart.setMeta({
       dwell_s: liveDwellSec,
       first_drop_at_ms: p.first_drop_at_ms,
+      acaia_stop_at_s: acaiaStopAtS,
     });
     if (p.final_weight_g != null) setWeight(p.final_weight_g);
     const pour = chart.pourTime();
@@ -1454,6 +1465,7 @@ async function replayShot(file) {
     chart.setShot(samples, {
       dwell_s: shot.dwell_s,
       first_drop_at_ms: shot.first_drop_at_ms,
+      acaia_stop_at_s: shot.acaia_stop_at_s,
     });
     setWeight(shot.final_weight_g ?? 0);
     const pour = chart.pourTime();
