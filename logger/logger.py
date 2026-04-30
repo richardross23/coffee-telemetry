@@ -76,18 +76,24 @@ WEIGHT_RANGE_G = (-5.0, 200.0)
 
 
 def looks_like_tare(record: dict) -> tuple[bool, str]:
-    """Return (is_tare, reason) for a shot record about to be saved."""
+    """Return (is_tare, reason) for a shot record about to be saved.
+
+    The firmware's shot/end final_weight_g is a snapshot of the scale
+    at exactly that moment — if the user lifts the cup, or BLE state is
+    stale at end-time, it can read 0 even though real flow happened.
+    Use max(samples.weight_g) as the authoritative final weight: it's
+    sourced from the same MQTT stream the dashboard renders live, so if
+    the curve was real on screen, the data's real here too.
+    """
     samples = record.get("samples") or []
     if not samples:
         return True, "no samples"
-    final = record.get("final_weight_g") or 0
-    if abs(final) < MIN_FINAL_WEIGHT_G:
-        return True, f"final_weight_g={final:.2f}g (below {MIN_FINAL_WEIGHT_G}g)"
+    sample_weights = [s.get("weight_g") for s in samples if s.get("weight_g") is not None]
+    sample_max = max(sample_weights) if sample_weights else 0
+    if sample_max < MIN_FINAL_WEIGHT_G:
+        return True, f"max sample weight {sample_max:.2f}g (below {MIN_FINAL_WEIGHT_G}g)"
     lo, hi = WEIGHT_RANGE_G
-    for s in samples:
-        w = s.get("weight_g")
-        if w is None:
-            continue
+    for w in sample_weights:
         if w < lo or w > hi:
             return True, f"weight {w:.1f}g outside [{lo}, {hi}]g"
     return False, ""
@@ -422,6 +428,23 @@ def on_message(client, userdata, msg):
         if is_tare:
             print(f"dropped shot {shot_id}: {reason}", flush=True)
             return
+
+        # Reconcile final_weight_g against samples — same defensive logic
+        # as the tare filter. If shot/end's snapshot is suspicious (zero
+        # or noticeably under the max sample), prefer the sample-derived
+        # value. Common when the user lifts the cup right before shot/end.
+        sample_weights = [s.get("weight_g") for s in record["samples"] if s.get("weight_g") is not None]
+        if sample_weights:
+            sample_max = max(sample_weights)
+            payload_final = record.get("final_weight_g") or 0
+            if sample_max > payload_final + 0.5:
+                record["final_weight_g"] = round(sample_max, 2)
+                record["final_weight_source"] = "samples"
+                print(
+                    f"  reconciled final_weight_g: shot/end said {payload_final:.2f}g, "
+                    f"samples max {sample_max:.2f}g — using samples",
+                    flush=True,
+                )
 
         # Auto-inherit bean/grinder/dose/notes from the previous shot — most
         # users keep the same setup for runs of shots and only change one
