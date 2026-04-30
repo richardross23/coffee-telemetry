@@ -165,11 +165,11 @@
   #tooltip .v.flow { color: var(--cream); }
   #tooltip .v.t { color: var(--fg); }
 
-  #subhero #stat-dwell, #subhero #stat-peak, #subhero #stat-ratio {
+  #subhero #stat-dwell, #subhero #stat-peak, #subhero #stat-ratio, #subhero #stat-afterdrip {
     opacity: 0; transform: translateY(-4px);
     transition: opacity 0.3s 0.05s, transform 0.3s 0.05s;
   }
-  #subhero #stat-dwell.visible, #subhero #stat-peak.visible, #subhero #stat-ratio.visible {
+  #subhero #stat-dwell.visible, #subhero #stat-peak.visible, #subhero #stat-ratio.visible, #subhero #stat-afterdrip.visible {
     opacity: 1; transform: translateY(0);
   }
 
@@ -398,6 +398,7 @@
         <div><span class="label" id="flow-label">flow</span><span id="flow-v">0.00 g/s</span></div>
         <div id="stat-ratio"><span class="label">ratio</span><span id="ratio-v">—</span></div>
         <div id="stat-dwell"><span class="label">dwell</span><span id="dwell-v">—s</span></div>
+        <div id="stat-afterdrip"><span class="label">after-drip</span><span id="afterdrip-v">—s</span></div>
         <div id="stat-peak"><span class="label">peak</span><span id="peak-v">— g/s</span></div>
       </div>
       <div id="shotinfo"></div>
@@ -429,8 +430,10 @@
         <rect class="decline-band" fill="rgba(232, 178, 96, 0.05)" x="0" y="0" width="0" height="100%"/>
         <line class="pump-on-mark" stroke="var(--copper)" stroke-width="1" stroke-dasharray="1 3" opacity="0" x1="0" x2="0" y1="0" y2="100%"/>
         <line class="first-drop" stroke="var(--copper)" stroke-width="1" stroke-dasharray="3 3" opacity="0" x1="0" x2="0" y1="0" y2="100%"/>
+        <line class="pump-off-mark" stroke="var(--warn)" stroke-width="1.4" stroke-dasharray="1 3" opacity="0" x1="0" x2="0" y1="0" y2="100%"/>
         <line class="decline-mark" stroke="var(--warn)" stroke-width="1" stroke-dasharray="3 3" opacity="0" x1="0" x2="0" y1="0" y2="100%"/>
-        <line class="acaia-stop-mark" stroke="var(--cream)" stroke-width="1.4" stroke-dasharray="4 2" opacity="0" x1="0" x2="0" y1="0" y2="100%"/>
+        <line class="last-drop-mark" stroke="var(--cream)" stroke-width="1.4" stroke-dasharray="4 2" opacity="0" x1="0" x2="0" y1="0" y2="100%"/>
+        <line class="acaia-stop-mark" stroke="var(--cream)" stroke-width="1" stroke-dasharray="2 4" opacity="0" x1="0" x2="0" y1="0" y2="100%"/>
         <path class="weight-fill" fill="url(#weight-grad)" d=""/>
         <path class="compare-weight" fill="none" stroke="var(--fg-2)" stroke-width="1.5" stroke-linejoin="round" stroke-linecap="round" opacity="0.35" stroke-dasharray="4 3" d=""/>
         <path class="compare-flow" fill="none" stroke="var(--fg-2)" stroke-width="1" stroke-linejoin="round" stroke-linecap="round" opacity="0.25" stroke-dasharray="2 3" d=""/>
@@ -508,9 +511,11 @@ const tooltip = $('tooltip');
 const statDwell = $('stat-dwell');
 const statPeak = $('stat-peak');
 const statRatio = $('stat-ratio');
+const statAfterDrip = $('stat-afterdrip');
 const dwellV = $('dwell-v');
 const peakV = $('peak-v');
 const ratioV = $('ratio-v');
+const afterDripV = $('afterdrip-v');
 
 let mode = 'live';
 let activeShotId = null;
@@ -583,7 +588,9 @@ class ShotChart {
     this.declineBand = svg.querySelector('.decline-band');
     this.firstDrop = svg.querySelector('.first-drop');
     this.pumpOnMark = svg.querySelector('.pump-on-mark');
+    this.pumpOffMark = svg.querySelector('.pump-off-mark');
     this.declineMark = svg.querySelector('.decline-mark');
+    this.lastDropMark = svg.querySelector('.last-drop-mark');
     this.acaiaStopMark = svg.querySelector('.acaia-stop-mark');
     this.weightFill = svg.querySelector('.weight-fill');
     this.weightCurve = svg.querySelector('.weight-curve');
@@ -784,6 +791,8 @@ class ShotChart {
       this.declineBand.setAttribute('width', 0);
       this.firstDrop.setAttribute('opacity', 0);
       this.pumpOnMark.setAttribute('opacity', 0);
+      this.pumpOffMark.setAttribute('opacity', 0);
+      this.lastDropMark.setAttribute('opacity', 0);
       this.declineMark.setAttribute('opacity', 0);
       this.acaiaStopMark.setAttribute('opacity', 0);
       return;
@@ -840,10 +849,23 @@ class ShotChart {
       ? tFirstDrop - dwellS
       : null;
     const tBandStart = tPumpOn ?? tLeft;
+    // Pump-off + last-drop are firmware/computed events in the shot/start
+    // reference frame, same as sample.t — render directly.
+    const tPumpOff = this.meta.pump_off_at_s ?? null;
+    const tLastDrop = this.meta.last_drop_at_s ?? null;
 
     setRect(this.preBand, tBandStart, tFirstDrop);
-    setRect(this.extractBand, tFirstDrop, tDeclineStart ?? tLast);
-    setRect(this.declineBand, tDeclineStart, tLast);
+    if (tPumpOff != null) {
+      // Authoritative: extraction phase ends at pump_off, after-drip
+      // phase fills [pump_off, last_drop] (or last sample if last_drop
+      // wasn't detected). Decline band hidden when we have real edges.
+      setRect(this.extractBand, tFirstDrop, tPumpOff);
+      setRect(this.declineBand, tPumpOff, tLastDrop ?? tLast);
+    } else {
+      // Legacy: heuristic decline-onset for shots without pump_off info.
+      setRect(this.extractBand, tFirstDrop, tDeclineStart ?? tLast);
+      setRect(this.declineBand, tDeclineStart, tLast);
+    }
 
     const setVerticalLine = (line, t) => {
       if (t == null) {
@@ -859,10 +881,12 @@ class ShotChart {
     };
     setVerticalLine(this.pumpOnMark, tPumpOn);
     setVerticalLine(this.firstDrop, tFirstDrop);
-    setVerticalLine(this.declineMark, tDeclineStart);
-    // Acaia auto-stop event time is in shot/start frame, same as samples'
-    // s.t — render directly. Cream colour distinguishes it from the
-    // copper/warn markers (it's the scale's voice, not ours).
+    setVerticalLine(this.pumpOffMark, tPumpOff);
+    setVerticalLine(this.lastDropMark, tLastDrop);
+    // Decline-onset heuristic only renders when pump_off isn't known —
+    // pump_off is the authoritative end-of-extraction signal.
+    setVerticalLine(this.declineMark, tPumpOff == null ? tDeclineStart : null);
+    // Acaia button-press event (rare; manual stop only) — cream dotted.
     setVerticalLine(this.acaiaStopMark, this.meta.acaia_stop_at_s ?? null);
   }
 
@@ -1008,6 +1032,15 @@ function showStats(p) {
     dwellV.textContent = '—';
     dwellV.style.color = '';
   }
+  // After-drip = pump_off → last_drop. Long values (>5s) mean the puck
+  // didn't seal — flag in warn colour as a quality signal.
+  if (p.after_drip_s != null) {
+    afterDripV.textContent = p.after_drip_s.toFixed(1) + 's';
+    afterDripV.style.color = p.after_drip_s > 5 ? 'var(--warn)' : '';
+    statAfterDrip.classList.add('visible');
+  } else {
+    statAfterDrip.classList.remove('visible');
+  }
   peakV.textContent = (p.peak_flow_g_s != null ? p.peak_flow_g_s.toFixed(2) : '—') + ' g/s';
   if (p.brew_ratio_str) {
     ratioV.textContent = p.brew_ratio_str;
@@ -1022,6 +1055,7 @@ function hideStats() {
   statDwell.classList.remove('visible');
   statPeak.classList.remove('visible');
   statRatio.classList.remove('visible');
+  statAfterDrip.classList.remove('visible');
 }
 
 // ---------- subhero values ----------
@@ -1136,17 +1170,26 @@ client.on('message', (topic, msg) => {
   } else if (topic === 'coffee/shot/end') {
     activeShotId = null;
     setBadge('Done', 'done');
-    // Convert Acaia stop ms → seconds inline (firmware sends ms, we
-    // store seconds throughout the rest of the pipeline).
+    // Convert ms → seconds inline (firmware sends ms, we store seconds
+    // through the rest of the pipeline).
     const acaiaStopAtS = (p.acaia_stop_at_ms != null) ? p.acaia_stop_at_ms / 1000 : null;
+    const pumpOffAtS = (p.pump_off_at_ms != null) ? p.pump_off_at_ms / 1000 : null;
     chart.setMeta({
       dwell_s: liveDwellSec,
       first_drop_at_ms: p.first_drop_at_ms,
       acaia_stop_at_s: acaiaStopAtS,
+      pump_off_at_s: pumpOffAtS,
+      // last_drop_at_s isn't in shot/end — logger computes it post-save
+      // and we'll see it on next index refresh / replay
     });
     if (p.final_weight_g != null) setWeight(p.final_weight_g);
+    // Prefer pump_time (pump_on → pump_off) over pour_time (first_drop →
+    // last_sample) for the headline duration when both pump events are
+    // known. pump_time is the canonical barista shot duration.
+    const pumpTimeS = (liveDwellSec != null && pumpOffAtS != null)
+      ? pumpOffAtS + liveDwellSec : null;
     const pour = chart.pourTime();
-    setElapsed(pour);
+    setElapsed(pumpTimeS ?? pour);
     const peak = chart.peakFlow();
     const avg = pour > 0 ? (p.final_weight_g ?? 0) / pour : 0;
     $('flow-label').textContent = 'avg';
@@ -1156,6 +1199,10 @@ client.on('message', (topic, msg) => {
     const dose = parseFloat(sticky.bean_weight_g);
     const ratioStr = (Number.isFinite(dose) && dose > 0 && p.final_weight_g)
       ? `1:${(p.final_weight_g / dose).toFixed(2)}` : null;
+    // After-drip arrives via the index refresh after the logger writes
+    // the file (it's a logger-derived field, not in the wire payload).
+    // For now, leave the slot empty on live shot/end; loadHistory()
+    // refresh below picks it up on replay.
     showStats({
       ...p,
       peak_flow_g_s: peak,
@@ -1466,10 +1513,20 @@ async function replayShot(file) {
       dwell_s: shot.dwell_s,
       first_drop_at_ms: shot.first_drop_at_ms,
       acaia_stop_at_s: shot.acaia_stop_at_s,
+      pump_off_at_s: shot.pump_off_at_s,
+      last_drop_at_s: shot.last_drop_at_s,
     });
     setWeight(shot.final_weight_g ?? 0);
+    // Headline duration prefers pump_time (when pump_off + dwell are both
+    // known) over pour_time. Logger derives both fields when present.
+    const pumpTimeS = (shot.dwell_s != null && shot.pump_off_at_s != null)
+      ? shot.pump_off_at_s + shot.dwell_s : null;
+    // after_drip is logger-derived too (last_drop − pump_off); not on
+    // the saved file, but exposed via the index entry. Look it up by file.
+    const afterDripS = (shot.last_drop_at_s != null && shot.pump_off_at_s != null)
+      ? shot.last_drop_at_s - shot.pump_off_at_s : null;
     const pour = chart.pourTime();
-    setElapsed(pour);
+    setElapsed(pumpTimeS ?? pour);
     const peak = chart.peakFlow();
     const avg = pour > 0 ? (shot.final_weight_g ?? 0) / pour : 0;
     $('flow-label').textContent = 'avg';
@@ -1478,7 +1535,12 @@ async function replayShot(file) {
     const dose = parseFloat(shot.metadata?.bean_weight_g);
     const ratioStr = (Number.isFinite(dose) && dose > 0 && shot.final_weight_g)
       ? `1:${(shot.final_weight_g / dose).toFixed(2)}` : null;
-    showStats({ ...shot, peak_flow_g_s: peak, brew_ratio_str: ratioStr });
+    showStats({
+      ...shot,
+      peak_flow_g_s: peak,
+      brew_ratio_str: ratioStr,
+      after_drip_s: afterDripS,
+    });
     setShotInfo(shot.metadata, parseSavedAt(file));
     loadHistory();
   } catch (e) {

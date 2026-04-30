@@ -158,6 +158,47 @@ def first_drop_t_ms(samples: list[dict], threshold: float = 0.1) -> int | None:
     return None
 
 
+def last_drop_t_ms(
+    samples: list[dict],
+    pump_off_t_ms: int | None,
+    threshold_g: float = 0.1,
+    settle_window_ms: int = 1000,
+) -> int | None:
+    """Find first t_ms after pump_off where weight stops changing.
+
+    Stabilisation = max(weight) − min(weight) ≤ threshold_g over a sliding
+    window that spans ≥ 80 % of settle_window_ms. Returns the anchor t_ms
+    of the first qualifying window, or None if the user lifted the cup
+    before the tail settled / sample stream cut off mid-tail.
+    """
+    if pump_off_t_ms is None or not samples:
+        return None
+    post = [
+        ((s.get("t_ms") or 0), s.get("weight_g"))
+        for s in samples
+        if (s.get("t_ms") or 0) >= pump_off_t_ms and s.get("weight_g") is not None
+    ]
+    if len(post) < 2:
+        return None
+    min_span_ms = settle_window_ms * 0.8
+    n = len(post)
+    for i in range(n):
+        anchor_t, _ = post[i]
+        weights = []
+        last_t = anchor_t
+        for j in range(i, n):
+            t, w = post[j]
+            if t - anchor_t > settle_window_ms:
+                break
+            weights.append(w)
+            last_t = t
+        # Need both: enough time covered AND weights stable within threshold
+        if (last_t - anchor_t) >= min_span_ms and len(weights) >= 2:
+            if (max(weights) - min(weights)) <= threshold_g:
+                return anchor_t
+    return None
+
+
 def derive_metadata_summary(meta: dict, saved_at_iso: str | None, final_weight_g: float | None) -> dict:
     """Build the convenience fields the history list shows at a glance.
 
@@ -219,13 +260,33 @@ def rebuild_index() -> None:
             pour_time_s = None
         meta = data.get("metadata") or {}
         saved_at = parse_ts(name)
+        # Derive the timing trifecta when we have all the events.
+        # pump_time = pump_on → pump_off (the canonical barista shot duration)
+        # after_drip = pump_off → last_drop (tail-off / quality signal)
+        dwell_s = data.get("dwell_s")
+        pump_off_s = data.get("pump_off_at_s")
+        last_drop_s = data.get("last_drop_at_s")
+        pump_time_s = (
+            pump_off_s + dwell_s
+            if pump_off_s is not None and dwell_s is not None
+            else None
+        )
+        after_drip_s = (
+            last_drop_s - pump_off_s
+            if pump_off_s is not None and last_drop_s is not None
+            else None
+        )
         entry = {
             "file": name,
             "saved_at": saved_at,
             "shot_id": data.get("shot_id"),
             "duration_s": data.get("duration_s"),
             "pour_time_s": pour_time_s,
-            "dwell_s": data.get("dwell_s"),
+            "pump_off_at_s": pump_off_s,
+            "last_drop_at_s": last_drop_s,
+            "pump_time_s": pump_time_s,
+            "after_drip_s": after_drip_s,
+            "dwell_s": dwell_s,
             "dwell_suspect": data.get("dwell_suspect", False),
             "acaia_start_at_s": data.get("acaia_start_at_s"),
             "acaia_stop_at_s": data.get("acaia_stop_at_s"),
@@ -413,16 +474,30 @@ def on_message(client, userdata, msg):
         # they sit alongside pour_time_s / dwell_s naturally. Fields are
         # absent if the corresponding BLE event didn't fire during the
         # shot window — leave them out of the saved record entirely.
+        # NOTE: Acaia auto-stop turned out not to broadcast over BLE; these
+        # fields will only populate on manual button presses. Kept in the
+        # schema as opportunistic signal.
         for src, dst in (
             ("acaia_start_at_ms", "acaia_start_at_s"),
             ("acaia_stop_at_ms", "acaia_stop_at_s"),
+            ("pump_off_at_ms", "pump_off_at_s"),
         ):
             v = payload.get(src)
             if v is not None:
                 record[dst] = v / 1000.0
-                # Don't keep the duplicate ms field in the saved record
                 record.pop(src, None)
-        # Weights pass through as-is.
+
+        # Last-drop = weight stabilisation after pump cuts. Compute from
+        # samples here so the saved record + index entry have a clean
+        # number to render without redoing the work in the browser.
+        pump_off_ms = (
+            int(record["pump_off_at_s"] * 1000)
+            if "pump_off_at_s" in record
+            else None
+        )
+        last_drop = last_drop_t_ms(record["samples"], pump_off_ms)
+        if last_drop is not None:
+            record["last_drop_at_s"] = last_drop / 1000.0
 
         is_tare, reason = looks_like_tare(record)
         if is_tare:
