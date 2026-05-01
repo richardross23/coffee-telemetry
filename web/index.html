@@ -1176,14 +1176,7 @@ function hideStats() {
 }
 
 // ---------- subhero values ----------
-function setElapsed(s, suspect = false) {
-  elapsedV.textContent = (Number.isFinite(s) ? s : 0).toFixed(1) + 's';
-  // Tint warn when firmware's pump_off detection looks delayed (last
-  // weight movement >2s before pump_off) — the headline is honest
-  // about what the firmware claimed, but flagged so it's clear that
-  // the *real* pump-off was earlier.
-  elapsedV.style.color = suspect ? 'var(--warn)' : '';
-}
+function setElapsed(s) { elapsedV.textContent = (Number.isFinite(s) ? s : 0).toFixed(1) + 's'; }
 function setFlow(f) { flowV.textContent = (Number.isFinite(f) ? f : 0).toFixed(2) + ' g/s'; }
 
 // Render the bean + grinder setup under the subhero, split into two
@@ -1352,13 +1345,7 @@ client.on('message', (topic, msg) => {
     // IS pump_time directly — no dwell offset needed.
     const pumpTimeS = pumpOffAtS;
     const pour = chart.pourTime();
-    // Mirror the logger: pump_off is suspect when the LIS3DH disengage
-    // fires >2s after the last weight sample (post-shot accel noise
-    // holding the pump-on state too long).
-    const lastSampleT = chart.samples.at(-1)?.t ?? null;
-    const pumpOffSuspect = pumpOffAtS != null && lastSampleT != null
-      && (pumpOffAtS - lastSampleT) > 2.0;
-    setElapsed(pumpTimeS ?? pour, pumpOffSuspect);
+    setElapsed(pumpTimeS ?? pour);
     const peak = chart.peakFlow();
     const avg = pour > 0 ? (p.final_weight_g ?? 0) / pour : 0;
     $('flow-label').textContent = 'avg';
@@ -1687,12 +1674,7 @@ async function replayShot(file) {
     // dwell offset needed).
     const pumpTimeS = shot.pump_off_at_s ?? null;
     const pour = chart.pourTime();
-    // Suspect-flag mirrors the logger: pump_off >2s after last weight
-    // sample suggests delayed LIS3DH disengage detection.
-    const lastSampleT = samples.at(-1)?.t ?? null;
-    const pumpOffSuspect = pumpTimeS != null && lastSampleT != null
-      && (pumpTimeS - lastSampleT) > 2.0;
-    setElapsed(pumpTimeS ?? pour, pumpOffSuspect);
+    setElapsed(pumpTimeS ?? pour);
     const peak = chart.peakFlow();
     const avg = pour > 0 ? (shot.final_weight_g ?? 0) / pour : 0;
     $('flow-label').textContent = 'avg';

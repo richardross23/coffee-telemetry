@@ -279,16 +279,6 @@ def rebuild_index() -> None:
             if pump_off_s is not None and last_drop_s is not None
             else None
         )
-        # Flag suspect pump_off detection: if the LIS3DH disengage fired
-        # more than 2 s after the last weight sample, the firmware likely
-        # held the "pump on" state too long (post-shot accelerometer
-        # noise above the disengage threshold). Real pump-off is closer
-        # to the last weight movement.
-        pump_off_suspect = (
-            pump_off_s is not None
-            and last_t is not None
-            and (pump_off_s - last_t / 1000.0) > 2.0
-        )
         entry = {
             "file": name,
             "saved_at": saved_at,
@@ -298,7 +288,6 @@ def rebuild_index() -> None:
             "pump_off_at_s": pump_off_s,
             "last_drop_at_s": last_drop_s,
             "pump_time_s": pump_time_s,
-            "pump_off_suspect": pump_off_suspect,
             "after_drip_s": after_drip_s,
             "dwell_s": dwell_s,
             "dwell_suspect": data.get("dwell_suspect", False),
