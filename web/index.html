@@ -737,18 +737,20 @@ class ShotChart {
   }
 
   // Data → SVG pixel coords. Chart spans from pump_on (or chart-leftmost
-  // sample if no pump info) to pump_off (the canonical shot duration).
-  // Samples beyond pump_off (after-drip) extend slightly past the right
-  // edge but the visible "shot duration" matches pump_time exactly.
+  // sample if no pump info) to pump_off — the canonical shot duration,
+  // matching the headline ELAPSED. When last_drop is past pump_off the
+  // chart extends just enough to show that 4th marker, but for normal
+  // shots the right edge IS pump_off (so visible duration == pump_time).
   xRange() {
     const minT = Math.min(0, this.samples[0]?.t ?? 0);
     const lastSampleT = this.samples.at(-1)?.t ?? 0;
-    // If we know pump_off, anchor the right edge there. Otherwise fall
-    // back to the last sample (legacy behaviour for shots without
-    // accelerometer data).
     const pumpOff = this.meta.pump_off_at_s;
+    const lastDrop = this.meta.last_drop_at_s;
+    // If we know pump_off, end the chart there (stretching to last_drop
+    // when it's later, so all markers stay on-canvas). Otherwise fall
+    // back to the legacy fixedMaxT/last-sample behaviour.
     const maxT = pumpOff != null
-      ? Math.max(this.fixedMaxT, pumpOff)
+      ? Math.max(pumpOff, lastDrop ?? pumpOff)
       : Math.max(this.fixedMaxT, lastSampleT);
     return [minT, maxT];
   }
@@ -1106,8 +1108,12 @@ class ShotChart {
 
     // All shots now use the pump_on=0 frame (firmware emits in this
     // frame; old shots backfilled by tools/backfill_pump_on_frame.py).
-    // Tooltip shows seconds since pump-on directly.
-    $('tt-t').textContent = nearest.t.toFixed(1) + ' s';
+    // Show the *cursor's* data-x for t (clamped to 0 in the prepend
+    // region) so hovering on the pump-on line always reads 0.0s — even
+    // when the nearest data sample is at a small negative t. Weight
+    // and flow remain anchored to the nearest sample for accuracy.
+    const displayT = Math.max(0, dataX);
+    $('tt-t').textContent = displayT.toFixed(1) + ' s';
     $('tt-w').textContent = (nearest.w ?? 0).toFixed(1) + ' g';
     $('tt-f').textContent = (nearest.f ?? 0).toFixed(2) + ' g/s';
     tooltip.classList.add('visible');
