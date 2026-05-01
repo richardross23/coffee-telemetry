@@ -410,13 +410,36 @@
     #hero { top: 14px; left: 16px; right: 16px; }
     #weight { font-size: 72px; }
     #weight .unit { font-size: 18px; }
+    /* Phone layout: graph leaves the upper-left empty, so stack stats
+       vertically on the LEFT and use the available column instead of
+       cramming three big numbers horizontally. */
     #hero-headline {
-      margin-top: 8px; gap: 18px; flex-wrap: wrap;
+      margin-top: 8px;
+      flex-direction: column;
+      align-items: flex-start;
+      gap: 4px;
+    }
+    .hstat {
+      flex-direction: row;
+      align-items: baseline;
+      gap: 10px;
+    }
+    .hlabel {
+      font-size: 10px; letter-spacing: 0.14em;
+      min-width: 64px;  /* align all three values down the right */
     }
     .hvalue { font-size: 22px; }
-    .hlabel { font-size: 10px; letter-spacing: 0.12em; }
+
     #hero-diagnostic {
-      margin-top: 8px; font-size: 11px; gap: 4px 12px;
+      margin-top: 10px; font-size: 11px; gap: 3px 14px;
+      flex-direction: column; align-items: flex-start;
+    }
+    #hero-diagnostic > span { gap: 6px; }
+
+    /* Setup groups stack on their own lines on phones. */
+    #shotinfo {
+      margin-top: 12px;
+      flex-direction: column; gap: 4px;
     }
 
     #history { width: 100vw; }
@@ -425,6 +448,7 @@
   @media (max-width: 400px) {
     #weight { font-size: 60px; }
     #weight .unit { font-size: 16px; }
+    .hvalue { font-size: 20px; }
   }
 </style>
 </head>
