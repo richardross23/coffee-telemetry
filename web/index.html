@@ -235,6 +235,12 @@
   #shotinfo .grind { color: var(--cream); font-variant-numeric: tabular-nums; }
   #shotinfo .roast { color: var(--dim); }
   #shotinfo .sep { color: var(--line-bright); }
+  /* Desktop: bean primary + secondary inline, separator between. */
+  #shotinfo .bean-primary + .bean-secondary::before {
+    content: '·';
+    color: var(--line-bright);
+    margin: 0 8px;
+  }
   @media (max-width: 600px) {
     #shotinfo { font-size: 11px; gap: 4px 16px; }
   }
@@ -441,6 +447,19 @@
       margin-top: 12px;
       flex-direction: column; gap: 4px;
     }
+    /* Bean group: secondary descriptors (Nd off roast · level) wrap
+       to their own line under the primary identity (brand · type),
+       indented to align under the value column rather than the label. */
+    #shotinfo .bean-group {
+      display: grid;
+      grid-template-columns: auto 1fr;
+      gap: 0 10px;
+      align-items: baseline;
+    }
+    #shotinfo .bean-group .glabel { grid-row: 1 / span 2; align-self: start; }
+    #shotinfo .bean-primary { grid-column: 2; grid-row: 1; }
+    #shotinfo .bean-secondary { grid-column: 2; grid-row: 2; }
+    #shotinfo .bean-primary + .bean-secondary::before { display: none; }
 
     #history { width: 100vw; }
     #tooltip { font-size: 11px; padding: 8px 11px; min-width: 110px; }
@@ -1165,24 +1184,26 @@ function setShotInfo(meta, savedAtIso) {
   if (!meta || typeof meta !== 'object') { el.innerHTML = ''; return; }
   const sep = '<span class="sep">·</span>';
 
-  // Bean group: brand · type · Nd off roast · roast level
-  const beanParts = [];
+  // Bean group split into PRIMARY (brand · type — the identity) and
+  // SECONDARY (Nd off roast · roast level — the descriptors). Mobile
+  // stacks secondary under primary on its own line; desktop shows
+  // them inline with a separator between.
+  const beanPrimary = [];
+  const beanSecondary = [];
   const beanLabel = [meta.bean_brand, meta.bean_type].filter(Boolean).join(' · ');
-  if (beanLabel) beanParts.push(`<span class="bean">${escapeHtml(beanLabel)}</span>`);
+  if (beanLabel) beanPrimary.push(`<span class="bean">${escapeHtml(beanLabel)}</span>`);
   if (meta.roast_date) {
     const ref = savedAtIso ? new Date(savedAtIso) : new Date();
     const roast = new Date(meta.roast_date);
     if (!isNaN(roast)) {
       const days = Math.round((ref - roast) / 86400000);
-      beanParts.push(`<span class="roast">${days}d off roast</span>`);
+      beanSecondary.push(`<span class="roast">${days}d off roast</span>`);
     }
   }
-  if (meta.roast_level) beanParts.push(`<span class="roast">${escapeHtml(meta.roast_level)}</span>`);
+  if (meta.roast_level) beanSecondary.push(`<span class="roast">${escapeHtml(meta.roast_level)}</span>`);
 
   // Grinder group: dose · grind duration · setting
   const grindParts = [];
-  // Prefer actual ground weight (from the grinder log) over the manual
-  // dose entry; fall back to bean_weight_g when no grind data is attached.
   const dose = meta.ground_weight_g ?? meta.bean_weight_g;
   if (dose != null) {
     const label = meta.ground_weight_g != null ? 'g ground' : 'g dose';
@@ -1194,8 +1215,15 @@ function setShotInfo(meta, savedAtIso) {
   if (meta.grinder_setting) grindParts.push(`<span class="grind">${escapeHtml(meta.grinder_setting)}</span>`);
 
   const groups = [];
-  if (beanParts.length) {
-    groups.push(`<span class="group bean-group"><span class="glabel">bean</span>${beanParts.join(' ' + sep + ' ')}</span>`);
+  if (beanPrimary.length || beanSecondary.length) {
+    let inner = '<span class="glabel">bean</span>';
+    if (beanPrimary.length) {
+      inner += `<span class="bean-primary">${beanPrimary.join(' ' + sep + ' ')}</span>`;
+    }
+    if (beanSecondary.length) {
+      inner += `<span class="bean-secondary">${beanSecondary.join(' ' + sep + ' ')}</span>`;
+    }
+    groups.push(`<span class="group bean-group">${inner}</span>`);
   }
   if (grindParts.length) {
     groups.push(`<span class="group grind-group"><span class="glabel">grind</span>${grindParts.join(' ' + sep + ' ')}</span>`);
