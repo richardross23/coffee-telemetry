@@ -271,8 +271,12 @@ def rebuild_index() -> None:
             if pump_off_s is not None and dwell_s is not None
             else None
         )
+        # Clamp after_drip to >= 0: the rare lungo case where the puck
+        # stops giving before the lever comes down would produce a small
+        # negative; treat it as 'no after-drip' for display purposes
+        # (per firmware's edge-case note).
         after_drip_s = (
-            last_drop_s - pump_off_s
+            max(0.0, last_drop_s - pump_off_s)
             if pump_off_s is not None and last_drop_s is not None
             else None
         )
@@ -495,23 +499,31 @@ def on_message(client, userdata, msg):
             ("acaia_start_at_ms", "acaia_start_at_s"),
             ("acaia_stop_at_ms", "acaia_stop_at_s"),
             ("pump_off_at_ms", "pump_off_at_s"),
+            # Firmware now ships last_drop_at_ms directly: timestamp of
+            # the last weight-increasing sample (Δ ≥ 0.1g) seen during
+            # EXTRACT or AFTER_DRIP. Authoritative — replaces the
+            # sample-scanning fallback below, which is dead under the
+            # pump-driven refactor since samples cut off at pump_off.
+            ("last_drop_at_ms", "last_drop_at_s"),
         ):
             v = payload.get(src)
             if v is not None:
                 record[dst] = v / 1000.0
                 record.pop(src, None)
 
-        # Last-drop = weight stabilisation after pump cuts. Compute from
-        # samples here so the saved record + index entry have a clean
-        # number to render without redoing the work in the browser.
-        pump_off_ms = (
-            int(record["pump_off_at_s"] * 1000)
-            if "pump_off_at_s" in record
-            else None
-        )
-        last_drop = last_drop_t_ms(record["samples"], pump_off_ms)
-        if last_drop is not None:
-            record["last_drop_at_s"] = last_drop / 1000.0
+        # Belt-and-braces: if firmware didn't provide last_drop_at_ms
+        # (older firmware, or a future regression), fall back to scanning
+        # samples post pump_off. Won't fire with current firmware since
+        # the field is always present on real shots.
+        if "last_drop_at_s" not in record:
+            pump_off_ms = (
+                int(record["pump_off_at_s"] * 1000)
+                if "pump_off_at_s" in record
+                else None
+            )
+            last_drop = last_drop_t_ms(record["samples"], pump_off_ms)
+            if last_drop is not None:
+                record["last_drop_at_s"] = last_drop / 1000.0
 
         is_tare, reason = looks_like_tare(record)
         if is_tare:

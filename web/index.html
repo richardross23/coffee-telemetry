@@ -1325,13 +1325,13 @@ client.on('message', (topic, msg) => {
     // through the rest of the pipeline).
     const acaiaStopAtS = (p.acaia_stop_at_ms != null) ? p.acaia_stop_at_ms / 1000 : null;
     const pumpOffAtS = (p.pump_off_at_ms != null) ? p.pump_off_at_ms / 1000 : null;
+    const lastDropAtS = (p.last_drop_at_ms != null) ? p.last_drop_at_ms / 1000 : null;
     chart.setMeta({
       dwell_s: liveDwellSec,
       first_drop_at_ms: p.first_drop_at_ms,
       acaia_stop_at_s: acaiaStopAtS,
       pump_off_at_s: pumpOffAtS,
-      // last_drop_at_s isn't in shot/end — logger computes it post-save
-      // and we'll see it on next index refresh / replay
+      last_drop_at_s: lastDropAtS,
     });
     if (p.final_weight_g != null) setWeight(p.final_weight_g);
     // Prefer pump_time (pump_on → pump_off) over pour_time (first_drop →
@@ -1350,16 +1350,18 @@ client.on('message', (topic, msg) => {
     const dose = parseFloat(sticky.bean_weight_g);
     const ratioStr = (Number.isFinite(dose) && dose > 0 && p.final_weight_g)
       ? `1:${(p.final_weight_g / dose).toFixed(2)}` : null;
-    // After-drip arrives via the index refresh after the logger writes
-    // the file (it's a logger-derived field, not in the wire payload).
-    // For now, leave the slot empty on live shot/end; loadHistory()
-    // refresh below picks it up on replay.
+    // After-drip = last_drop - pump_off, clamped to ≥ 0 (per firmware
+    // edge-case note: lungo-style shots can stop giving slightly before
+    // pump-down, treat any negative as 0 for display).
+    const afterDripS = (lastDropAtS != null && pumpOffAtS != null)
+      ? Math.max(0, lastDropAtS - pumpOffAtS) : null;
     showStats({
       ...p,
       peak_flow_g_s: peak,
       brew_ratio_str: ratioStr,
       dwell_s: liveDwellSec,
       dwell_suspect: liveDwellSec != null && liveDwellSec > 15,
+      after_drip_s: afterDripS,
     });
     loadHistory();
   }
