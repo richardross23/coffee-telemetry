@@ -209,14 +209,14 @@
   #stat-ratio.visible { opacity: 1; }
 
   /* ===== Tier 3: setup metadata =====
-     Split into BEAN: and GRIND: labeled groups with a wide gap so the
-     eye reads them as two distinct "input" categories rather than one
-     long sentence. */
+     BEAN and GRIND on separate lines (always — side-by-side packs them
+     into a single sentence which defeats the visual grouping). Each
+     group is its own row. */
   #shotinfo {
     margin-top: 16px;
     font-size: 11px; color: var(--fg-2);
     letter-spacing: 0.04em;
-    display: flex; flex-wrap: wrap; gap: 6px 32px;
+    display: flex; flex-direction: column; gap: 4px;
     max-width: 90ch;
     transition: opacity 0.2s;
   }
@@ -228,7 +228,7 @@
   #shotinfo .glabel {
     color: var(--dim); font-size: 10px;
     letter-spacing: 0.14em; text-transform: uppercase;
-    margin-right: 4px;
+    min-width: 48px;  /* align BEAN/GRIND values down a single column */
   }
   #shotinfo .bean { color: var(--fg); }
   #shotinfo .dose { color: var(--copper-bright); font-variant-numeric: tabular-nums; font-weight: 500; }
