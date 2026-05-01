@@ -114,14 +114,46 @@
     font-size: 32px; color: var(--dim); font-weight: 300;
     font-style: italic; letter-spacing: 0;
   }
-  #subhero {
-    margin-top: 10px;
-    display: flex; align-items: baseline; gap: 18px;
-    color: var(--fg-2); font-size: 13px;
-    letter-spacing: 0.06em; text-transform: uppercase;
+  /* ===== Tier 1: headline metrics =====
+     Three big stats spaced across the width: ratio · time · flow.
+     Small-caps label above, large Fraunces value below. */
+  #hero-headline {
+    margin-top: 14px;
+    display: flex; align-items: baseline; gap: 36px;
   }
-  #subhero .label { color: var(--dim); margin-right: 6px; }
-  #elapsed-v, #flow-v { font-variant-numeric: tabular-nums; color: var(--copper-bright); font-weight: 500; }
+  .hstat { display: flex; flex-direction: column; gap: 4px; }
+  .hlabel {
+    font-size: 11px; color: var(--dim);
+    letter-spacing: 0.16em; text-transform: uppercase;
+    font-weight: 500;
+  }
+  .hvalue {
+    font-family: 'Fraunces', serif; font-weight: 300;
+    font-size: 32px; line-height: 1;
+    color: var(--copper-bright);
+    font-variant-numeric: tabular-nums;
+    letter-spacing: -0.01em;
+  }
+
+  /* ===== Tier 2: diagnostic detail =====
+     Smaller inline stats. Each fades in independently as data arrives
+     (dwell + peak on shot end, after-drip when last_drop computed). */
+  #hero-diagnostic {
+    margin-top: 14px;
+    display: flex; flex-wrap: wrap; gap: 4px 22px;
+    font-size: 12px; color: var(--fg-2);
+    letter-spacing: 0.04em;
+  }
+  #hero-diagnostic > span {
+    display: inline-flex; align-items: baseline; gap: 5px;
+  }
+  #hero-diagnostic .dlabel {
+    color: var(--dim); font-size: 10px;
+    letter-spacing: 0.14em; text-transform: uppercase;
+  }
+  #dwell-v, #afterdrip-v, #peak-v {
+    color: var(--fg); font-variant-numeric: tabular-nums; font-weight: 500;
+  }
 
   /* tank widget — sits in the header */
   #tank-widget {
@@ -165,30 +197,46 @@
   #tooltip .v.flow { color: var(--cream); }
   #tooltip .v.t { color: var(--fg); }
 
-  #subhero #stat-dwell, #subhero #stat-peak, #subhero #stat-ratio, #subhero #stat-afterdrip {
-    opacity: 0; transform: translateY(-4px);
+  /* Tier 2 diagnostic stats: fade in independently as their data lands. */
+  #hero-diagnostic > span {
+    opacity: 0; transform: translateY(-3px);
     transition: opacity 0.3s 0.05s, transform 0.3s 0.05s;
   }
-  #subhero #stat-dwell.visible, #subhero #stat-peak.visible, #subhero #stat-ratio.visible, #subhero #stat-afterdrip.visible {
-    opacity: 1; transform: translateY(0);
-  }
+  #hero-diagnostic > span.visible { opacity: 1; transform: translateY(0); }
+  /* Tier 1 ratio fades in only on shot end (other tier-1 slots are
+     always visible — counting up live, then frozen at end). */
+  #stat-ratio { opacity: 0; transition: opacity 0.3s; }
+  #stat-ratio.visible { opacity: 1; }
 
-  /* Bean / grinder / dose summary under the subhero */
+  /* ===== Tier 3: setup metadata =====
+     Split into BEAN: and GRIND: labeled groups with a wide gap so the
+     eye reads them as two distinct "input" categories rather than one
+     long sentence. */
   #shotinfo {
-    margin-top: 8px;
-    font-size: 12px; color: var(--fg-2);
+    margin-top: 16px;
+    font-size: 11px; color: var(--fg-2);
     letter-spacing: 0.04em;
-    display: flex; flex-wrap: wrap; gap: 4px 14px;
-    max-width: 60ch;
+    display: flex; flex-wrap: wrap; gap: 6px 32px;
+    max-width: 90ch;
     transition: opacity 0.2s;
   }
   #shotinfo:empty { display: none; }
+  #shotinfo .group {
+    display: inline-flex; align-items: baseline; gap: 6px;
+    flex-wrap: wrap;
+  }
+  #shotinfo .glabel {
+    color: var(--dim); font-size: 10px;
+    letter-spacing: 0.14em; text-transform: uppercase;
+    margin-right: 4px;
+  }
   #shotinfo .bean { color: var(--fg); }
   #shotinfo .dose { color: var(--copper-bright); font-variant-numeric: tabular-nums; font-weight: 500; }
   #shotinfo .grind { color: var(--cream); font-variant-numeric: tabular-nums; }
   #shotinfo .roast { color: var(--dim); }
+  #shotinfo .sep { color: var(--line-bright); }
   @media (max-width: 600px) {
-    #shotinfo { font-size: 11px; gap: 2px 10px; }
+    #shotinfo { font-size: 11px; gap: 4px 16px; }
   }
 
   /* ---------- history panel ---------- */
@@ -343,7 +391,9 @@
     #hero { top: 18px; left: 22px; right: 22px; }
     #weight { font-size: 96px; }
     #weight .unit { font-size: 22px; }
-    #subhero { font-size: 12px; gap: 14px; flex-wrap: wrap; }
+    #hero-headline { gap: 24px; margin-top: 10px; }
+    .hvalue { font-size: 26px; }
+    #hero-diagnostic { margin-top: 10px; gap: 4px 16px; }
   }
   @media (max-width: 600px) {
     header {
@@ -360,11 +410,14 @@
     #hero { top: 14px; left: 16px; right: 16px; }
     #weight { font-size: 72px; }
     #weight .unit { font-size: 18px; }
-    #subhero {
-      margin-top: 6px; font-size: 11px; gap: 8px 14px;
-      letter-spacing: 0.04em;
+    #hero-headline {
+      margin-top: 8px; gap: 18px; flex-wrap: wrap;
     }
-    #subhero .label { margin-right: 4px; }
+    .hvalue { font-size: 22px; }
+    .hlabel { font-size: 10px; letter-spacing: 0.12em; }
+    #hero-diagnostic {
+      margin-top: 8px; font-size: 11px; gap: 4px 12px;
+    }
 
     #history { width: 100vw; }
     #tooltip { font-size: 11px; padding: 8px 11px; min-width: 110px; }
@@ -393,14 +446,30 @@
   <div id="stage">
     <div id="hero">
       <div id="weight"><span class="v">—</span><span class="unit">g</span></div>
-      <div id="subhero">
-        <div><span class="label">elapsed</span><span id="elapsed-v">0.0s</span></div>
-        <div><span class="label" id="flow-label">flow</span><span id="flow-v">0.00 g/s</span></div>
-        <div id="stat-ratio"><span class="label">ratio</span><span id="ratio-v">—</span></div>
-        <div id="stat-dwell"><span class="label">dwell</span><span id="dwell-v">—s</span></div>
-        <div id="stat-afterdrip"><span class="label">after-drip</span><span id="afterdrip-v">—s</span></div>
-        <div id="stat-peak"><span class="label">peak</span><span id="peak-v">— g/s</span></div>
+      <!-- Tier 1: headline metrics — ratio, time, flow. Always present;
+           values show "—" until known. Sized to be the second-most
+           prominent thing on the page after the weight number itself. -->
+      <div id="hero-headline">
+        <div class="hstat" id="stat-ratio">
+          <div class="hlabel">ratio</div>
+          <div class="hvalue" id="ratio-v">—</div>
+        </div>
+        <div class="hstat" id="stat-time">
+          <div class="hlabel" id="elapsed-label">elapsed</div>
+          <div class="hvalue" id="elapsed-v">0.0s</div>
+        </div>
+        <div class="hstat" id="stat-flow">
+          <div class="hlabel" id="flow-label">flow</div>
+          <div class="hvalue" id="flow-v">0.00 g/s</div>
+        </div>
       </div>
+      <!-- Tier 2: diagnostic detail — fades in on shot end / replay. -->
+      <div id="hero-diagnostic">
+        <span id="stat-dwell"><span class="dlabel">dwell</span> <span id="dwell-v">—s</span></span>
+        <span id="stat-afterdrip"><span class="dlabel">after-drip</span> <span id="afterdrip-v">—s</span></span>
+        <span id="stat-peak"><span class="dlabel">peak</span> <span id="peak-v">— g/s</span></span>
+      </div>
+      <!-- Tier 3: setup metadata, BEAN / GRIND labeled groups. -->
       <div id="shotinfo"></div>
     </div>
 
@@ -1062,36 +1131,52 @@ function hideStats() {
 function setElapsed(s) { elapsedV.textContent = (Number.isFinite(s) ? s : 0).toFixed(1) + 's'; }
 function setFlow(f) { flowV.textContent = (Number.isFinite(f) ? f : 0).toFixed(2) + ' g/s'; }
 
-// Render the bean / grinder / dose summary under the subhero.
+// Render the bean + grinder setup under the subhero, split into two
+// labeled groups (BEAN / GRIND) with a wide visible gap so the eye reads
+// them as distinct input categories rather than one long sentence.
 // `savedAtIso` lets us compute days-off-roast when replaying a saved shot;
 // for live shots we fall back to "today" so the days-off number is current.
 function setShotInfo(meta, savedAtIso) {
   const el = $('shotinfo');
   if (!meta || typeof meta !== 'object') { el.innerHTML = ''; return; }
-  const parts = [];
-  const bean = [meta.bean_brand, meta.bean_type].filter(Boolean).join(' · ');
-  if (bean) parts.push(`<span class="bean">${escapeHtml(bean)}</span>`);
-  // Prefer actual ground weight (from the grinder log) over the manual
-  // dose entry; fall back to bean_weight_g when no grind data is attached.
-  const dose = meta.ground_weight_g ?? meta.bean_weight_g;
-  if (dose != null) {
-    const label = meta.ground_weight_g != null ? 'g ground' : 'g dose';
-    parts.push(`<span class="dose">${(+dose).toFixed(1)}${label}</span>`);
-  }
-  if (meta.grind_duration_s != null) {
-    parts.push(`<span class="grind">${(+meta.grind_duration_s).toFixed(2)}s grind</span>`);
-  }
-  if (meta.grinder_setting) parts.push(`<span class="grind">${escapeHtml(meta.grinder_setting)}</span>`);
+  const sep = '<span class="sep">·</span>';
+
+  // Bean group: brand · type · Nd off roast · roast level
+  const beanParts = [];
+  const beanLabel = [meta.bean_brand, meta.bean_type].filter(Boolean).join(' · ');
+  if (beanLabel) beanParts.push(`<span class="bean">${escapeHtml(beanLabel)}</span>`);
   if (meta.roast_date) {
     const ref = savedAtIso ? new Date(savedAtIso) : new Date();
     const roast = new Date(meta.roast_date);
     if (!isNaN(roast)) {
       const days = Math.round((ref - roast) / 86400000);
-      parts.push(`<span class="roast">${days}d off roast</span>`);
+      beanParts.push(`<span class="roast">${days}d off roast</span>`);
     }
   }
-  if (meta.roast_level) parts.push(`<span class="roast">${escapeHtml(meta.roast_level)}</span>`);
-  el.innerHTML = parts.join('<span class="dim">·</span> ');
+  if (meta.roast_level) beanParts.push(`<span class="roast">${escapeHtml(meta.roast_level)}</span>`);
+
+  // Grinder group: dose · grind duration · setting
+  const grindParts = [];
+  // Prefer actual ground weight (from the grinder log) over the manual
+  // dose entry; fall back to bean_weight_g when no grind data is attached.
+  const dose = meta.ground_weight_g ?? meta.bean_weight_g;
+  if (dose != null) {
+    const label = meta.ground_weight_g != null ? 'g ground' : 'g dose';
+    grindParts.push(`<span class="dose">${(+dose).toFixed(1)}${label}</span>`);
+  }
+  if (meta.grind_duration_s != null) {
+    grindParts.push(`<span class="grind">${(+meta.grind_duration_s).toFixed(2)}s grind</span>`);
+  }
+  if (meta.grinder_setting) grindParts.push(`<span class="grind">${escapeHtml(meta.grinder_setting)}</span>`);
+
+  const groups = [];
+  if (beanParts.length) {
+    groups.push(`<span class="group bean-group"><span class="glabel">bean</span>${beanParts.join(' ' + sep + ' ')}</span>`);
+  }
+  if (grindParts.length) {
+    groups.push(`<span class="group grind-group"><span class="glabel">grind</span>${grindParts.join(' ' + sep + ' ')}</span>`);
+  }
+  el.innerHTML = groups.join('');
 }
 function clearShotInfo() { $('shotinfo').innerHTML = ''; }
 
