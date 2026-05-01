@@ -424,6 +424,9 @@ def on_message(client, userdata, msg):
         # Skip any sample where |weight| exceeds the espresso first-drop
         # range — that's almost certainly cup placement or tare events
         # captured incidentally by the always-on weight stream.
+        # Note: as of the pump-driven firmware refactor, shot/start now
+        # fires at pump_on (not first weight rise), so dwell_ms is no
+        # longer in this payload — it lands in shot/end instead.
         start_wall = time.time()
         cutoff = start_wall - PREPEND_LOOKBACK_SEC
         prepend = [
@@ -431,18 +434,12 @@ def on_message(client, userdata, msg):
             for ts, w in scale_buffer
             if ts >= cutoff and abs(w) <= PREPEND_MAX_WEIGHT_G
         ]
-        # dwell_ms = pump-on → first-drop (firmware reports it on shot/start
-        # since v3.x). 0 means pump-detect didn't see lever-up in time;
-        # treat as "no measurement".
-        dwell_ms = payload.get("dwell_ms")
         shots_in_flight[shot_id] = {
             "start": payload,
             "samples": [],
             "prepend": prepend,
-            "dwell_ms": dwell_ms if dwell_ms else None,
         }
-        dwell_str = f", dwell {dwell_ms}ms" if dwell_ms else ""
-        print(f"shot {shot_id} started ({len(prepend)} prepend samples{dwell_str})", flush=True)
+        print(f"shot {shot_id} started ({len(prepend)} prepend samples)", flush=True)
 
     elif msg.topic == T_SAMPLE:
         shots_in_flight[shot_id]["samples"].append({
@@ -452,23 +449,40 @@ def on_message(client, userdata, msg):
         })
 
     elif msg.topic == T_END:
+        # Aborted shots (firmware decided this wasn't a real shot —
+        # backflush, blind basket, accidental lever-bump, descale, or
+        # explicit acaia_tare). Drop without running the heuristic
+        # tare filter; the firmware's verdict is authoritative.
+        if payload.get("aborted"):
+            shots_in_flight.pop(shot_id, None)
+            reason = payload.get("reason", "?")
+            dur = payload.get("duration_s")
+            wt = payload.get("final_weight_g")
+            print(
+                f"dropped shot {shot_id}: aborted by firmware "
+                f"(reason={reason}, duration={dur}s, weight={wt}g)",
+                flush=True,
+            )
+            return
+
         buf = shots_in_flight.pop(
-            shot_id, {"start": None, "samples": [], "prepend": [], "dwell_ms": None}
+            shot_id, {"start": None, "samples": [], "prepend": []}
         )
         record = dict(payload)
         record.setdefault("samples", buf["prepend"] + buf["samples"])
         if buf["start"] and "tank_pct_at_start" not in record:
             record["tank_pct_at_start"] = buf["start"].get("tank_pct_at_start")
 
-        # Carry dwell info from shot/start onto the saved record, in
-        # seconds for consistency with pour_time_s etc. Anything > 15s is
-        # almost certainly a stale pump_on detection (mounted-too-loose
-        # threshold) — flag it so the dashboard can render in warn colour.
-        dwell_ms = buf.get("dwell_ms")
+        # dwell_ms now lands in shot/end (was in shot/start under the old
+        # firmware — the pump-driven refactor moved it because dwell can't
+        # be known at shot-start any more, only at first-drop arrival).
+        dwell_ms = payload.get("dwell_ms")
         if dwell_ms:
             record["dwell_s"] = dwell_ms / 1000.0
             if dwell_ms > 15000:
                 record["dwell_suspect"] = True
+            # Don't keep the duplicate ms field in the saved record
+            record.pop("dwell_ms", None)
 
         # Acaia button events relayed by firmware. Convert ms → seconds so
         # they sit alongside pour_time_s / dwell_s naturally. Fields are

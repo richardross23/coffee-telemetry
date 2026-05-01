@@ -1279,9 +1279,10 @@ client.on('message', (topic, msg) => {
     setShotInfo(loadSticky());
     if (p.tank_pct_at_start != null) tankV.textContent = Math.round(p.tank_pct_at_start);
 
-    // dwell_ms = pump-on → first-drop, firmware-measured. 0 / missing
-    // means pump-detect didn't see lever-up before first drop.
-    liveDwellSec = (p.dwell_ms && p.dwell_ms > 0) ? p.dwell_ms / 1000 : null;
+    // dwell now arrives in shot/end (pump-driven firmware refactor).
+    // Reset to null at shot/start so the previous shot's value doesn't
+    // bleed into this shot's chart meta if shot/end arrives without it.
+    liveDwellSec = null;
 
     // Prepend the rolling weight buffer so the chart starts at the real
     // first drop, not at the firmware's >1g detection trigger. Drop any
@@ -1306,7 +1307,20 @@ client.on('message', (topic, msg) => {
     setFlow(chart.samples.at(-1)?.f);
   } else if (topic === 'coffee/shot/end') {
     activeShotId = null;
+    // Aborted shots (backflush, blind basket, no_flow, acaia_tare)
+    // come down the same topic but with aborted: true. Skip the UI
+    // refresh — the live state stays where it was, no badge -> Done,
+    // no stats. Just go back to Idle.
+    if (p.aborted) {
+      setBadge('Idle', 'idle');
+      console.log(`shot ${p.shot_id} aborted: ${p.reason ?? '?'}`);
+      return;
+    }
     setBadge('Done', 'done');
+    // dwell_ms now lives in shot/end (was in shot/start under the old
+    // firmware — pump-driven refactor moved it). Capture here for
+    // chart.setMeta + showStats below.
+    liveDwellSec = (p.dwell_ms && p.dwell_ms > 0) ? p.dwell_ms / 1000 : null;
     // Convert ms → seconds inline (firmware sends ms, we store seconds
     // through the rest of the pipeline).
     const acaiaStopAtS = (p.acaia_stop_at_ms != null) ? p.acaia_stop_at_ms / 1000 : null;
