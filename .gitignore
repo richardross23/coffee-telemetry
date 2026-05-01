@@ -4,3 +4,4 @@ shots/*.json
 .DS_Store
 tools/fram.bin
 tools/*.bin
+logger/__pycache__/

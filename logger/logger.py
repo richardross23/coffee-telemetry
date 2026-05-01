@@ -261,16 +261,15 @@ def rebuild_index() -> None:
         meta = data.get("metadata") or {}
         saved_at = parse_ts(name)
         # Derive the timing trifecta when we have all the events.
-        # pump_time = pump_on → pump_off (the canonical barista shot duration)
-        # after_drip = pump_off → last_drop (tail-off / quality signal)
+        # pump_time = pump_on → pump_off (the canonical barista shot duration).
+        # Under the pump-driven firmware, shot_start fires at pump_on, so
+        # pump_off_at_s is already (pump_off − pump_on) = pump_time.
+        # Older shots have been backfilled to the same frame, so no
+        # dwell add needed any more.
         dwell_s = data.get("dwell_s")
         pump_off_s = data.get("pump_off_at_s")
         last_drop_s = data.get("last_drop_at_s")
-        pump_time_s = (
-            pump_off_s + dwell_s
-            if pump_off_s is not None and dwell_s is not None
-            else None
-        )
+        pump_time_s = pump_off_s if pump_off_s is not None else None
         # Clamp after_drip to >= 0: the rare lungo case where the puck
         # stops giving before the lever comes down would produce a small
         # negative; treat it as 'no after-drip' for display purposes

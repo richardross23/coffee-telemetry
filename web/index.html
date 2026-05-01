@@ -137,7 +137,7 @@
 
   /* ===== Tier 2: diagnostic detail =====
      Smaller inline stats. Each fades in independently as data arrives
-     (dwell + peak on shot end, after-drip when last_drop computed). */
+     (dwell + peak on shot end). */
   #hero-diagnostic {
     margin-top: 14px;
     display: flex; flex-wrap: wrap; gap: 4px 22px;
@@ -151,7 +151,7 @@
     color: var(--dim); font-size: 10px;
     letter-spacing: 0.14em; text-transform: uppercase;
   }
-  #dwell-v, #afterdrip-v, #peak-v {
+  #dwell-v, #peak-v {
     color: var(--fg); font-variant-numeric: tabular-nums; font-weight: 500;
   }
 
@@ -509,7 +509,6 @@
       <!-- Tier 2: diagnostic detail — fades in on shot end / replay. -->
       <div id="hero-diagnostic">
         <span id="stat-dwell"><span class="dlabel">dwell</span> <span id="dwell-v">—s</span></span>
-        <span id="stat-afterdrip"><span class="dlabel">after-drip</span> <span id="afterdrip-v">—s</span></span>
         <span id="stat-peak"><span class="dlabel">peak</span> <span id="peak-v">— g/s</span></span>
       </div>
       <!-- Tier 3: setup metadata, BEAN / GRIND labeled groups. -->
@@ -623,11 +622,9 @@ const tooltip = $('tooltip');
 const statDwell = $('stat-dwell');
 const statPeak = $('stat-peak');
 const statRatio = $('stat-ratio');
-const statAfterDrip = $('stat-afterdrip');
 const dwellV = $('dwell-v');
 const peakV = $('peak-v');
 const ratioV = $('ratio-v');
-const afterDripV = $('afterdrip-v');
 
 let mode = 'live';
 let activeShotId = null;
@@ -739,10 +736,20 @@ class ShotChart {
     this.svg.setAttribute('viewBox', `0 0 ${this.W} ${this.H}`);
   }
 
-  // Data → SVG pixel coords
+  // Data → SVG pixel coords. Chart spans from pump_on (or chart-leftmost
+  // sample if no pump info) to pump_off (the canonical shot duration).
+  // Samples beyond pump_off (after-drip) extend slightly past the right
+  // edge but the visible "shot duration" matches pump_time exactly.
   xRange() {
     const minT = Math.min(0, this.samples[0]?.t ?? 0);
-    const maxT = Math.max(this.fixedMaxT, this.samples.at(-1)?.t ?? 0);
+    const lastSampleT = this.samples.at(-1)?.t ?? 0;
+    // If we know pump_off, anchor the right edge there. Otherwise fall
+    // back to the last sample (legacy behaviour for shots without
+    // accelerometer data).
+    const pumpOff = this.meta.pump_off_at_s;
+    const maxT = pumpOff != null
+      ? Math.max(this.fixedMaxT, pumpOff)
+      : Math.max(this.fixedMaxT, lastSampleT);
     return [minT, maxT];
   }
   xScale(t) {
@@ -1097,8 +1104,10 @@ class ShotChart {
     this.cursorDotF.setAttribute('cy', sf);
     this.cursorDotF.setAttribute('opacity', 1);
 
-    const tFirstDrop = this.firstDropT() ?? 0;
-    $('tt-t').textContent = (nearest.t - tFirstDrop).toFixed(1) + ' s';
+    // All shots now use the pump_on=0 frame (firmware emits in this
+    // frame; old shots backfilled by tools/backfill_pump_on_frame.py).
+    // Tooltip shows seconds since pump-on directly.
+    $('tt-t').textContent = nearest.t.toFixed(1) + ' s';
     $('tt-w').textContent = (nearest.w ?? 0).toFixed(1) + ' g';
     $('tt-f').textContent = (nearest.f ?? 0).toFixed(2) + ' g/s';
     tooltip.classList.add('visible');
@@ -1144,15 +1153,6 @@ function showStats(p) {
     dwellV.textContent = '—';
     dwellV.style.color = '';
   }
-  // After-drip = pump_off → last_drop. Long values (>5s) mean the puck
-  // didn't seal — flag in warn colour as a quality signal.
-  if (p.after_drip_s != null) {
-    afterDripV.textContent = p.after_drip_s.toFixed(1) + 's';
-    afterDripV.style.color = p.after_drip_s > 5 ? 'var(--warn)' : '';
-    statAfterDrip.classList.add('visible');
-  } else {
-    statAfterDrip.classList.remove('visible');
-  }
   peakV.textContent = (p.peak_flow_g_s != null ? p.peak_flow_g_s.toFixed(2) : '—') + ' g/s';
   if (p.brew_ratio_str) {
     ratioV.textContent = p.brew_ratio_str;
@@ -1167,7 +1167,6 @@ function hideStats() {
   statDwell.classList.remove('visible');
   statPeak.classList.remove('visible');
   statRatio.classList.remove('visible');
-  statAfterDrip.classList.remove('visible');
 }
 
 // ---------- subhero values ----------
@@ -1335,10 +1334,10 @@ client.on('message', (topic, msg) => {
     });
     if (p.final_weight_g != null) setWeight(p.final_weight_g);
     // Prefer pump_time (pump_on → pump_off) over pour_time (first_drop →
-    // last_sample) for the headline duration when both pump events are
-    // known. pump_time is the canonical barista shot duration.
-    const pumpTimeS = (liveDwellSec != null && pumpOffAtS != null)
-      ? pumpOffAtS + liveDwellSec : null;
+    // last_sample) for the headline duration. Under the pump_on=0
+    // convention (current firmware + backfilled old shots), pump_off_at_s
+    // IS pump_time directly — no dwell offset needed.
+    const pumpTimeS = pumpOffAtS;
     const pour = chart.pourTime();
     setElapsed(pumpTimeS ?? pour);
     const peak = chart.peakFlow();
@@ -1350,18 +1349,12 @@ client.on('message', (topic, msg) => {
     const dose = parseFloat(sticky.bean_weight_g);
     const ratioStr = (Number.isFinite(dose) && dose > 0 && p.final_weight_g)
       ? `1:${(p.final_weight_g / dose).toFixed(2)}` : null;
-    // After-drip = last_drop - pump_off, clamped to ≥ 0 (per firmware
-    // edge-case note: lungo-style shots can stop giving slightly before
-    // pump-down, treat any negative as 0 for display).
-    const afterDripS = (lastDropAtS != null && pumpOffAtS != null)
-      ? Math.max(0, lastDropAtS - pumpOffAtS) : null;
     showStats({
       ...p,
       peak_flow_g_s: peak,
       brew_ratio_str: ratioStr,
       dwell_s: liveDwellSec,
       dwell_suspect: liveDwellSec != null && liveDwellSec > 15,
-      after_drip_s: afterDripS,
     });
     loadHistory();
   }
@@ -1670,14 +1663,10 @@ async function replayShot(file) {
       last_drop_at_s: shot.last_drop_at_s,
     });
     setWeight(shot.final_weight_g ?? 0);
-    // Headline duration prefers pump_time (when pump_off + dwell are both
-    // known) over pour_time. Logger derives both fields when present.
-    const pumpTimeS = (shot.dwell_s != null && shot.pump_off_at_s != null)
-      ? shot.pump_off_at_s + shot.dwell_s : null;
-    // after_drip is logger-derived too (last_drop − pump_off); not on
-    // the saved file, but exposed via the index entry. Look it up by file.
-    const afterDripS = (shot.last_drop_at_s != null && shot.pump_off_at_s != null)
-      ? shot.last_drop_at_s - shot.pump_off_at_s : null;
+    // Headline duration prefers pump_time over pour_time. Under the
+    // pump_on=0 convention, pump_off_at_s IS pump_time directly (no
+    // dwell offset needed).
+    const pumpTimeS = shot.pump_off_at_s ?? null;
     const pour = chart.pourTime();
     setElapsed(pumpTimeS ?? pour);
     const peak = chart.peakFlow();
@@ -1692,7 +1681,6 @@ async function replayShot(file) {
       ...shot,
       peak_flow_g_s: peak,
       brew_ratio_str: ratioStr,
-      after_drip_s: afterDripS,
     });
     setShotInfo(shot.metadata, parseSavedAt(file));
     loadHistory();
