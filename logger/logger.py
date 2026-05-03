@@ -413,8 +413,8 @@ def handle_raw_chunk(payload: bytes) -> None:
     body = b"".join(bucket["chunks"][i] for i in range(total))
     try:
         raw = json.loads(body)
-    except json.JSONDecodeError as e:
-        log.warning("raw %s: bad JSON after reassembly: %s", shot_id, e)
+    except (json.JSONDecodeError, UnicodeDecodeError) as e:
+        log.warning("raw %s: parse failed (%d bytes): %s", shot_id, len(body), e)
         return
     _save_raw_archive(shot_id, raw)
 
