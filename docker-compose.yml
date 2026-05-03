@@ -4,20 +4,17 @@ services:
     container_name: mosquitto
     restart: unless-stopped
     ports:
-      - "1883:1883"
-      - "9001:9001"
+      - "1883:1883"   # MQTT (firmware + tools)
+      - "9001:9001"   # MQTT-over-WebSockets (browser)
     volumes:
       - ./mosquitto/config:/mosquitto/config
       - ./mosquitto/data:/mosquitto/data
-      - ./mosquitto/log:/mosquitto/log
 
   shot-logger:
-    image: python:3-slim
+    build: ./logger
     container_name: shot-logger
     restart: unless-stopped
-    command: sh -c "pip install --quiet paho-mqtt && python -u /app/logger.py"
     volumes:
-      - ./logger:/app
       - ./shots:/data/shots
     depends_on:
       - mosquitto

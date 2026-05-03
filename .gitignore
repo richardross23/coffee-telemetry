@@ -1,7 +1,13 @@
+# Runtime data
 mosquitto/data/
-mosquitto/log/
-shots/*.json
+shots/
+
+# Python
+**/__pycache__/
+
+# OS
 .DS_Store
-tools/fram.bin
-tools/*.bin
-logger/__pycache__/
+
+# Local dumps from grinder reverse-engineering
+tools/grinder/*.bin
+tools/grinder/*.hex

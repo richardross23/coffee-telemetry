@@ -94,10 +94,8 @@
   main { position: relative; min-height: 0; overflow: hidden; }
   #stage { position: relative; width: 100%; height: 100%; padding: 28px 36px; }
 
-  /* hero readout — big number floating top-left over the chart's
-     prepend region. Backdrop tint + blur stops chart curves and axis
-     labels from bleeding through, especially on mobile where the
-     hero stacks vertically and overlaps more chart area. */
+  /* hero readout — floats top-left over the chart's prepend region;
+     tinted backdrop stops the chart bleeding through. */
   #hero {
     position: absolute; top: 28px; left: 36px; z-index: 5;
     pointer-events: none;
@@ -123,9 +121,7 @@
     font-size: 32px; color: var(--dim); font-weight: 300;
     font-style: italic; letter-spacing: 0;
   }
-  /* ===== Tier 1: headline metrics =====
-     Three big stats spaced across the width: ratio · time · flow.
-     Small-caps label above, large Fraunces value below. */
+  /* Tier 1: ratio · elapsed · flow. */
   #hero-headline {
     margin-top: 14px;
     display: flex; align-items: baseline; gap: 36px;
@@ -144,9 +140,7 @@
     letter-spacing: -0.01em;
   }
 
-  /* ===== Tier 2: diagnostic detail =====
-     Smaller inline stats. Each fades in independently as data arrives
-     (dwell + peak on shot end). */
+  /* Tier 2: dwell + peak, fade in on shot end. */
   #hero-diagnostic {
     margin-top: 14px;
     display: flex; flex-wrap: wrap; gap: 4px 22px;
@@ -206,21 +200,18 @@
   #tooltip .v.flow { color: var(--cream); }
   #tooltip .v.t { color: var(--fg); }
 
-  /* Tier 2 diagnostic stats: fade in independently as their data lands. */
+  /* Tier 2 stats fade in as their data arrives. */
   #hero-diagnostic > span {
     opacity: 0; transform: translateY(-3px);
     transition: opacity 0.3s 0.05s, transform 0.3s 0.05s;
   }
   #hero-diagnostic > span.visible { opacity: 1; transform: translateY(0); }
-  /* Tier 1 ratio fades in only on shot end (other tier-1 slots are
-     always visible — counting up live, then frozen at end). */
+  /* Ratio is the only Tier 1 stat that fades — others count up live. */
   #stat-ratio { opacity: 0; transition: opacity 0.3s; }
   #stat-ratio.visible { opacity: 1; }
 
-  /* ===== Tier 3: setup metadata =====
-     BEAN and GRIND on separate lines (always — side-by-side packs them
-     into a single sentence which defeats the visual grouping). Each
-     group is its own row. */
+  /* Tier 3: BEAN and GRIND on separate rows so they read as labelled
+     groups, not one long sentence. */
   #shotinfo {
     margin-top: 16px;
     font-size: 11px; color: var(--fg-2);
@@ -421,9 +412,7 @@
     #tank-widget { padding: 4px 8px; font-size: 10px; }
     #status { font-size: 10px; flex-basis: 100%; text-align: right; }
 
-    /* On mobile: ditch the chart-overlay layout. Stack hero ABOVE the
-       chart in normal flow so the curve isn't hidden behind the
-       backdrop. Chart-wrap takes remaining vertical space. */
+    /* Mobile: stack hero above chart in normal flow (no overlay). */
     #stage {
       padding: 14px 16px;
       display: flex; flex-direction: column; gap: 10px;
@@ -436,10 +425,7 @@
       -webkit-backdrop-filter: none;
       padding: 0; margin: 0; border-radius: 0;
       flex-shrink: 0;
-      /* Two-column on mobile: big weight number on the left, the
-         RATIO/ELAPSED/AVG stack rides on its right shoulder. Pulls
-         diagnostic + setup info upward and gives the chart more
-         headroom. */
+      /* Two-column: weight on the left, headline stack on the right. */
       display: grid;
       grid-template-columns: auto 1fr;
       grid-template-areas:
@@ -464,9 +450,7 @@
     }
     #weight { font-size: 72px; }
     #weight .unit { font-size: 18px; }
-    /* Phone layout: graph leaves the upper-left empty, so stack stats
-       vertically on the LEFT and use the available column instead of
-       cramming three big numbers horizontally. */
+    /* Stats stack vertically on phones — three big numbers won't fit horizontally. */
     #hero-headline {
       margin-top: 8px;
       flex-direction: column;
@@ -484,22 +468,18 @@
     }
     .hvalue { font-size: 22px; }
 
-    /* DWELL + PEAK inline on one row instead of stacked — saves a row
-       of vertical space, both still fit comfortably in the width. */
+    /* DWELL + PEAK inline on one row to save vertical space. */
     #hero-diagnostic {
       margin-top: 6px; font-size: 11px; gap: 4px 18px;
       flex-direction: row; flex-wrap: wrap; align-items: baseline;
     }
     #hero-diagnostic > span { gap: 6px; }
 
-    /* Setup groups stack on their own lines on phones. */
     #shotinfo {
       margin-top: 6px;
       flex-direction: column; gap: 2px;
     }
-    /* Bean group: secondary descriptors (Nd off roast · level) wrap
-       to their own line under the primary identity (brand · type),
-       indented to align under the value column rather than the label. */
+    /* Bean: secondary descriptors wrap under the primary identity, indented. */
     #shotinfo .bean-group {
       display: grid;
       grid-template-columns: auto 1fr;
@@ -588,11 +568,9 @@
         <rect class="grid-bg" width="100%" height="100%" fill="url(#grid)" opacity="0.5"/>
         <rect class="preinfusion-band" fill="rgba(212, 145, 92, 0.06)" stroke="rgba(212, 145, 92, 0.18)" stroke-dasharray="2 4" stroke-width="1" x="0" y="0" width="0" height="100%"/>
         <rect class="extraction-band" fill="rgba(143, 188, 122, 0.04)" x="0" y="0" width="0" height="100%"/>
-        <rect class="decline-band" fill="rgba(232, 178, 96, 0.05)" x="0" y="0" width="0" height="100%"/>
         <line class="pump-on-mark" stroke="var(--copper)" stroke-width="1.6" stroke-dasharray="1 4" opacity="0" x1="0" x2="0" y1="0" y2="100%"/>
         <line class="first-drop" stroke="var(--copper)" stroke-width="1.6" stroke-dasharray="4 3" opacity="0" x1="0" x2="0" y1="0" y2="100%"/>
         <line class="pump-off-mark" stroke="var(--warn)" stroke-width="2" stroke-dasharray="1 4" opacity="0" x1="0" x2="0" y1="0" y2="100%"/>
-        <line class="decline-mark" stroke="var(--warn)" stroke-width="1" stroke-dasharray="3 3" opacity="0" x1="0" x2="0" y1="0" y2="100%"/>
         <line class="last-drop-mark" stroke="var(--cream)" stroke-width="2" stroke-dasharray="4 3" opacity="0" x1="0" x2="0" y1="0" y2="100%"/>
         <line class="acaia-stop-mark" stroke="var(--cream)" stroke-width="1" stroke-dasharray="2 4" opacity="0" x1="0" x2="0" y1="0" y2="100%"/>
         <path class="weight-fill" fill="url(#weight-grad)" d=""/>
@@ -675,6 +653,11 @@ const statRatio = $('stat-ratio');
 const dwellV = $('dwell-v');
 const peakV = $('peak-v');
 const ratioV = $('ratio-v');
+const ttT = $('tt-t');
+const ttW = $('tt-w');
+const ttF = $('tt-f');
+const flowLabel = $('flow-label');
+const chartWrap = $('chart-wrap');
 
 let mode = 'live';
 let activeShotId = null;
@@ -732,23 +715,22 @@ class ShotChart {
     this.fixedMaxF = 3.5;  // g/s
 
     // Flow is derived from the weight curve via a sliding-window
-    // derivative + EMA. BLE timing irregularities can deliver two
-    // samples within a few ms of each other and inflate ΔW/ΔT
-    // briefly (we've seen 80 g/s — a real espresso peaks 1.5–3 g/s),
-    // so any raw derivative above flowMaxG is clipped before EMA.
+    // derivative + EMA. BLE timing jitter can briefly inflate ΔW/ΔT
+    // well past the physical 1.5-3 g/s range, so anything over
+    // flowMaxG is rejected before the EMA update.
     this.flowWindowS = 1.0;
     this.flowEma = 0.4;
-    this.flowMaxG = 8.0;  // physically-impossible-above guard
+    this.flowMaxG = 8.0;
     this.flowSmoothed = 0;
+    this._maxW = this.fixedMaxW;
+    this._maxF = this.fixedMaxF;
 
     this.bg = svg.querySelector('.grid-bg');
     this.preBand = svg.querySelector('.preinfusion-band');
     this.extractBand = svg.querySelector('.extraction-band');
-    this.declineBand = svg.querySelector('.decline-band');
     this.firstDrop = svg.querySelector('.first-drop');
     this.pumpOnMark = svg.querySelector('.pump-on-mark');
     this.pumpOffMark = svg.querySelector('.pump-off-mark');
-    this.declineMark = svg.querySelector('.decline-mark');
     this.lastDropMark = svg.querySelector('.last-drop-mark');
     this.acaiaStopMark = svg.querySelector('.acaia-stop-mark');
     this.weightFill = svg.querySelector('.weight-fill');
@@ -786,26 +768,17 @@ class ShotChart {
     this.svg.setAttribute('viewBox', `0 0 ${this.W} ${this.H}`);
   }
 
-  // Data → SVG pixel coords. Chart spans from pump_on (or chart-leftmost
-  // sample if no pump info) to pump_off — the canonical shot duration,
-  // matching the headline ELAPSED. When last_drop is past pump_off the
-  // chart extends just enough to show that 4th marker, but for normal
-  // shots the right edge IS pump_off (so visible duration == pump_time).
+  // Chart x-range: from pump_on (or up to 3s of prepend) to pump_off.
+  // When pump_off isn't known yet (mid-shot live), fall back to a
+  // floor of fixedMaxT or the last sample, whichever is later.
   xRange() {
-    // Cap the prepend window at -3s — gives the hero overlay a small
-    // canvas without burning 10s of horizontal space on a flat 0g line
-    // (full prepend buffer is ~10s; we render the most recent 3s).
     const PREPEND_VIEW_S = 3;
     const minT = Math.max(-PREPEND_VIEW_S, Math.min(0, this.samples[0]?.t ?? 0));
-    const lastSampleT = this.samples.at(-1)?.t ?? 0;
     const pumpOff = this.meta.pump_off_at_s;
     const lastDrop = this.meta.last_drop_at_s;
-    // If we know pump_off, end the chart there (stretching to last_drop
-    // when it's later, so all markers stay on-canvas). Otherwise fall
-    // back to the legacy fixedMaxT/last-sample behaviour.
     const maxT = pumpOff != null
       ? Math.max(pumpOff, lastDrop ?? pumpOff)
-      : Math.max(this.fixedMaxT, lastSampleT);
+      : Math.max(this.fixedMaxT, this.samples.at(-1)?.t ?? 0);
     return [minT, maxT];
   }
   xScale(t) {
@@ -814,26 +787,36 @@ class ShotChart {
     return this.pad.l + ((t - minT) / span) * (this.W - this.pad.l - this.pad.r);
   }
   yScaleW(w) {
-    const maxW = Math.max(this.fixedMaxW, ...this.samples.map(s => s.w || 0));
-    return this.H - this.pad.b - (w / maxW) * (this.H - this.pad.t - this.pad.b);
+    return this.H - this.pad.b - (w / this._maxW) * (this.H - this.pad.t - this.pad.b);
   }
   yScaleF(f) {
-    const maxF = Math.max(this.fixedMaxF, ...this.samples.map(s => s.f || 0));
-    return this.H - this.pad.b - (f / maxF) * (this.H - this.pad.t - this.pad.b);
+    return this.H - this.pad.b - (f / this._maxF) * (this.H - this.pad.t - this.pad.b);
+  }
+
+  // Recompute the y-axis ceilings whenever sample data changes.
+  _updateBounds() {
+    let maxW = this.fixedMaxW, maxF = this.fixedMaxF;
+    for (const s of this.samples) {
+      if ((s.w || 0) > maxW) maxW = s.w;
+      if ((s.f || 0) > maxF) maxF = s.f;
+    }
+    this._maxW = maxW;
+    this._maxF = maxF;
   }
 
   setShot(samples, meta) {
     this.samples = (samples || []).filter(s => Number.isFinite(s.t) && Number.isFinite(s.w));
     this.meta = meta || {};
-    // Recompute flow for every sample (overrides whatever the firmware sent).
     this.flowSmoothed = 0;
     for (let i = 0; i < this.samples.length; i++) this._deriveFlowAt(i);
+    this._updateBounds();
     this.render();
   }
   appendSample(s) {
     if (!Number.isFinite(s.t) || !Number.isFinite(s.w)) return;
     this.samples.push(s);
     this._deriveFlowAt(this.samples.length - 1);
+    this._updateBounds();
     this.render();
   }
   setMeta(meta) { Object.assign(this.meta, meta); this.render(); }
@@ -927,32 +910,6 @@ class ShotChart {
     return Math.max(0, t - t0);
   }
 
-  // Index of the peak-flow sample (max derived flow). null if no flow yet.
-  peakFlowIdx() {
-    let pi = -1, pf = 0;
-    for (let i = 0; i < this.samples.length; i++) {
-      const f = this.samples[i].f || 0;
-      if (f > pf) { pf = f; pi = i; }
-    }
-    return pi >= 0 ? pi : null;
-  }
-
-  // First sample after peak where flow has dropped sustainedly (3 samples
-  // each below 90% of peak). Returns the t value, or null if not declining yet.
-  declineStartT() {
-    const pi = this.peakFlowIdx();
-    if (pi == null) return null;
-    const peak = this.samples[pi].f || 0;
-    if (peak <= 0) return null;
-    let consecutive = 0;
-    for (let i = pi + 1; i < this.samples.length; i++) {
-      if ((this.samples[i].f || 0) < peak * 0.9) {
-        if (++consecutive >= 3) return this.samples[i - 2].t;
-      } else { consecutive = 0; }
-    }
-    return null;
-  }
-
   render() {
     this._renderAxes();
     this._renderCompare();
@@ -963,12 +920,10 @@ class ShotChart {
       this.weightFill.setAttribute('d', '');
       this.preBand.setAttribute('width', 0);
       this.extractBand.setAttribute('width', 0);
-      this.declineBand.setAttribute('width', 0);
       this.firstDrop.setAttribute('opacity', 0);
       this.pumpOnMark.setAttribute('opacity', 0);
       this.pumpOffMark.setAttribute('opacity', 0);
       this.lastDropMark.setAttribute('opacity', 0);
-      this.declineMark.setAttribute('opacity', 0);
       this.acaiaStopMark.setAttribute('opacity', 0);
       return;
     }
@@ -992,11 +947,9 @@ class ShotChart {
     const yBase = this.H - this.pad.b;
     this.weightFill.setAttribute('d', `M${xLeft} ${yBase} ` + dW.slice(1) + `L${xRight} ${yBase} Z`);
 
-    // ----- phase bands -----
-    // Preinfusion: leftmost edge (could be negative t for prepended buffer)
-    //              up to first drop.
-    // Extraction:  first drop → decline-onset (or last sample if no decline)
-    // Decline:     decline-onset → last sample
+    // Phase bands and event markers. Preinfusion: pump_on → first drop.
+    // Extraction: first drop → pump_off (or last sample if pump_off
+    // isn't yet known, e.g. mid-shot live).
     const yTop = this.pad.t;
     const bandH = this.H - this.pad.t - this.pad.b;
     const setRect = (rect, t1, t2) => {
@@ -1013,34 +966,17 @@ class ShotChart {
     };
 
     const tFirstDrop = this.firstDropT();
-    const tDeclineStart = this.declineStartT();
     const tLast = this.samples.at(-1).t;
     const tLeft = this.samples[0].t;
-    // Pump-on, when known, is dwell_s seconds before first-drop. Anchor
-    // the dwell band to it; otherwise the band falls back to the
-    // chart's leftmost edge (legacy behaviour for shots without dwell data).
     const dwellS = this.meta.dwell_s;
     const tPumpOn = (dwellS != null && dwellS > 0 && tFirstDrop != null)
       ? tFirstDrop - dwellS
       : null;
-    const tBandStart = tPumpOn ?? tLeft;
-    // Pump-off + last-drop are firmware/computed events in the shot/start
-    // reference frame, same as sample.t — render directly.
     const tPumpOff = this.meta.pump_off_at_s ?? null;
     const tLastDrop = this.meta.last_drop_at_s ?? null;
 
-    setRect(this.preBand, tBandStart, tFirstDrop);
-    if (tPumpOff != null) {
-      // Authoritative: extraction phase ends at pump_off, after-drip
-      // phase fills [pump_off, last_drop] (or last sample if last_drop
-      // wasn't detected). Decline band hidden when we have real edges.
-      setRect(this.extractBand, tFirstDrop, tPumpOff);
-      setRect(this.declineBand, tPumpOff, tLastDrop ?? tLast);
-    } else {
-      // Legacy: heuristic decline-onset for shots without pump_off info.
-      setRect(this.extractBand, tFirstDrop, tDeclineStart ?? tLast);
-      setRect(this.declineBand, tDeclineStart, tLast);
-    }
+    setRect(this.preBand, tPumpOn ?? tLeft, tFirstDrop);
+    setRect(this.extractBand, tFirstDrop, tPumpOff ?? tLast);
 
     const setVerticalLine = (line, t, opacity = 0.85) => {
       if (t == null) {
@@ -1058,10 +994,7 @@ class ShotChart {
     setVerticalLine(this.firstDrop, tFirstDrop);
     setVerticalLine(this.pumpOffMark, tPumpOff);
     setVerticalLine(this.lastDropMark, tLastDrop);
-    // Decline-onset heuristic only renders when pump_off isn't known —
-    // pump_off is the authoritative end-of-extraction signal.
-    setVerticalLine(this.declineMark, tPumpOff == null ? tDeclineStart : null);
-    // Acaia button-press event (rare; manual stop only) — cream dotted.
+    // Manual Acaia button-press (rare; auto-stop doesn't broadcast).
     setVerticalLine(this.acaiaStopMark, this.meta.acaia_stop_at_s ?? null);
   }
 
@@ -1110,22 +1043,17 @@ class ShotChart {
     }
 
     // Y axis (weight, left): ticks every 10g.
-    const maxW = Math.max(this.fixedMaxW, ...this.samples.map(s => s.w || 0));
-    const yStep = 10;
-    for (let v = 0; v <= maxW; v += yStep) {
-      const py = this.yScaleW(v);
+    for (let v = 0; v <= this._maxW; v += 10) {
       mk('text', {
-        x: 8, y: py + 3, fill: '#7a6a58',
+        x: 8, y: this.yScaleW(v) + 3, fill: '#7a6a58',
         'font-size': 10, 'text-anchor': 'start', 'font-family': 'Inter, sans-serif',
       }, `${v}g`);
     }
 
     // Y axis (flow, right): ticks every 1 g/s.
-    const maxF = Math.max(this.fixedMaxF, ...this.samples.map(s => s.f || 0));
-    for (let v = 0; v <= maxF; v += 1) {
-      const py = this.yScaleF(v);
+    for (let v = 0; v <= this._maxF; v += 1) {
       mk('text', {
-        x: this.W - 8, y: py + 3, fill: '#7a6a58',
+        x: this.W - 8, y: this.yScaleF(v) + 3, fill: '#7a6a58',
         'font-size': 10, 'text-anchor': 'end', 'font-family': 'Inter, sans-serif',
       }, `${v}g/s`);
     }
@@ -1159,20 +1087,16 @@ class ShotChart {
     this.cursorDotF.setAttribute('cy', sf);
     this.cursorDotF.setAttribute('opacity', 1);
 
-    // All shots now use the pump_on=0 frame (firmware emits in this
-    // frame; old shots backfilled by tools/backfill_pump_on_frame.py).
-    // Show the *cursor's* data-x for t (clamped to 0 in the prepend
-    // region) so hovering on the pump-on line always reads 0.0s — even
-    // when the nearest data sample is at a small negative t. Weight
-    // and flow remain anchored to the nearest sample for accuracy.
-    const displayT = Math.max(0, dataX);
-    $('tt-t').textContent = displayT.toFixed(1) + ' s';
-    $('tt-w').textContent = (nearest.w ?? 0).toFixed(1) + ' g';
-    $('tt-f').textContent = (nearest.f ?? 0).toFixed(2) + ' g/s';
+    // Tooltip t uses the cursor's data-x (clamped to 0 in the prepend
+    // region) so hovering on the pump-on line always reads 0.0s, even
+    // when the nearest sample is at a small negative t. Weight and
+    // flow stay anchored to the nearest sample.
+    ttT.textContent = Math.max(0, dataX).toFixed(1) + ' s';
+    ttW.textContent = (nearest.w ?? 0).toFixed(1) + ' g';
+    ttF.textContent = (nearest.f ?? 0).toFixed(2) + ' g/s';
     tooltip.classList.add('visible');
-    // position near cursor, but flip if near right edge
     const tw = tooltip.offsetWidth || 160;
-    const wrapR = $('chart-wrap').getBoundingClientRect();
+    const wrapR = chartWrap.getBoundingClientRect();
     const left = (e.clientX - wrapR.left) + 14;
     const right = wrapR.width - left - tw;
     tooltip.style.left = (right < 0 ? (e.clientX - wrapR.left - tw - 14) : left) + 'px';
@@ -1206,8 +1130,8 @@ function showStats(p) {
   // means "not measurable" — show — instead of a misleading 0s.
   if (p.dwell_s != null && p.dwell_s > 0) {
     dwellV.textContent = p.dwell_s.toFixed(1) + 's';
-    // > 15 s = almost certainly a stale pump_on detection on a noisy mount
-    dwellV.style.color = (p.dwell_s > 15 || p.dwell_suspect) ? 'var(--bad)' : '';
+    // > 15 s = almost certainly a stale pump_on detection on a noisy mount.
+    dwellV.style.color = p.dwell_s > 15 ? 'var(--bad)' : '';
   } else {
     dwellV.textContent = '—';
     dwellV.style.color = '';
@@ -1232,20 +1156,15 @@ function hideStats() {
 function setElapsed(s) { elapsedV.textContent = (Number.isFinite(s) ? s : 0).toFixed(1) + 's'; }
 function setFlow(f) { flowV.textContent = (Number.isFinite(f) ? f : 0).toFixed(2) + ' g/s'; }
 
-// Render the bean + grinder setup under the subhero, split into two
-// labeled groups (BEAN / GRIND) with a wide visible gap so the eye reads
-// them as distinct input categories rather than one long sentence.
-// `savedAtIso` lets us compute days-off-roast when replaying a saved shot;
-// for live shots we fall back to "today" so the days-off number is current.
+// Render the BEAN / GRIND setup line under the hero. savedAtIso is
+// used for days-off-roast on replayed shots; live shots fall back to today.
 function setShotInfo(meta, savedAtIso) {
   const el = $('shotinfo');
-  if (!meta || typeof meta !== 'object') { el.innerHTML = ''; return; }
+  if (!meta) { el.innerHTML = ''; return; }
   const sep = '<span class="sep">·</span>';
 
-  // Bean group split into PRIMARY (brand · type — the identity) and
-  // SECONDARY (Nd off roast · roast level — the descriptors). Mobile
-  // stacks secondary under primary on its own line; desktop shows
-  // them inline with a separator between.
+  // Bean: PRIMARY (brand · type) on one line, SECONDARY (days off
+  // roast · level) on the next.
   const beanPrimary = [];
   const beanSecondary = [];
   const beanLabel = [meta.bean_brand, meta.bean_type].filter(Boolean).join(' · ');
@@ -1291,7 +1210,8 @@ function setShotInfo(meta, savedAtIso) {
 function clearShotInfo() { $('shotinfo').innerHTML = ''; }
 
 // ---------- MQTT ----------
-const wsUrl = `ws://${window.location.hostname}:9001`;
+const wsProto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+const wsUrl = `${wsProto}//${window.location.hostname}:9001`;
 const client = mqtt.connect(wsUrl, {
   clientId: 'web-' + Math.random().toString(16).slice(2, 10),
   reconnectPeriod: 2000,
@@ -1333,79 +1253,63 @@ client.on('message', (topic, msg) => {
     setBadge('Extracting', 'extracting');
     displayedWeight = 0; setWeight(0);
     setElapsed(0); setFlow(0);
-    $('flow-label').textContent = 'flow';
+    flowLabel.textContent = 'flow';
     setShotInfo(loadSticky());
     if (p.tank_pct_at_start != null) tankV.textContent = Math.round(p.tank_pct_at_start);
 
-    // dwell now arrives in shot/end (pump-driven firmware refactor).
-    // Reset to null at shot/start so the previous shot's value doesn't
-    // bleed into this shot's chart meta if shot/end arrives without it.
+    // Reset to null so the previous shot's dwell doesn't bleed into
+    // this one if shot/end arrives without it.
     liveDwellSec = null;
 
     // Prepend the rolling weight buffer so the chart starts at the real
-    // first drop, not at the firmware's >1g detection trigger. Drop any
-    // sample where |weight| exceeds PREPEND_MAX_WEIGHT_G — that's the
-    // cup-placement / tare spike, not a real drip.
+    // first drop. Skip cup-placement / tare spikes above the threshold.
     const startWall = Date.now();
     const cutoff = startWall - PREPEND_LOOKBACK_MS;
     const prepend = scaleBuffer
       .filter(e => e.ts >= cutoff && Math.abs(e.w) <= PREPEND_MAX_WEIGHT_G)
       .map(e => ({ t: (e.ts - startWall) / 1000, w: e.w, f: 0 }));
-    chart.setShot(prepend, { dwell_s: liveDwellSec });
+    chart.setShot(prepend, {});
   } else if (topic === 'coffee/shot/sample') {
     if (activeShotId == null) {
       activeShotId = p.shot_id;
       setBadge('Extracting', 'extracting');
     }
     const t = (p.t_ms ?? 0) / 1000;
-    // Ignore p.flow_g_s — chart derives flow from weight (firmware bug).
+    // Chart derives flow from weight; ignore the firmware-supplied value.
     chart.appendSample({ t, w: p.weight_g, f: 0 });
     setWeight(p.weight_g ?? 0);
     setElapsed(chart.elapsedAt(t));
     setFlow(chart.samples.at(-1)?.f);
   } else if (topic === 'coffee/shot/end') {
     activeShotId = null;
-    // Aborted shots (backflush, blind basket, no_flow, acaia_tare)
-    // come down the same topic but with aborted: true. Skip the UI
-    // refresh — the live state stays where it was, no badge -> Done,
-    // no stats. Just go back to Idle.
+    // Firmware aborts (backflush, blind basket, no_flow, acaia_tare).
+    // Leave live state where it was, badge back to Idle.
     if (p.aborted) {
       setBadge('Idle', 'idle');
-      console.log(`shot ${p.shot_id} aborted: ${p.reason ?? '?'}`);
       return;
     }
     setBadge('Done', 'done');
-    // dwell_ms now lives in shot/end (was in shot/start under the old
-    // firmware — pump-driven refactor moved it). Capture here for
-    // chart.setMeta + showStats below.
     liveDwellSec = (p.dwell_ms && p.dwell_ms > 0) ? p.dwell_ms / 1000 : null;
-    // Convert ms → seconds inline (firmware sends ms, we store seconds
-    // through the rest of the pipeline).
-    const acaiaStopAtS = (p.acaia_stop_at_ms != null) ? p.acaia_stop_at_ms / 1000 : null;
-    const pumpOffAtS = (p.pump_off_at_ms != null) ? p.pump_off_at_ms / 1000 : null;
-    const lastDropAtS = (p.last_drop_at_ms != null) ? p.last_drop_at_ms / 1000 : null;
+    const acaiaStopAtS = p.acaia_stop_at_ms != null ? p.acaia_stop_at_ms / 1000 : null;
+    const pumpOffAtS   = p.pump_off_at_ms   != null ? p.pump_off_at_ms   / 1000 : null;
+    const lastDropAtS  = p.last_drop_at_ms  != null ? p.last_drop_at_ms  / 1000 : null;
     chart.setMeta({
       dwell_s: liveDwellSec,
-      first_drop_at_ms: p.first_drop_at_ms,
       acaia_stop_at_s: acaiaStopAtS,
       pump_off_at_s: pumpOffAtS,
       last_drop_at_s: lastDropAtS,
     });
     if (p.final_weight_g != null) setWeight(p.final_weight_g);
-    // Prefer pump_time (pump_on → pump_off) over pour_time (first_drop →
-    // last_sample) for the headline duration. Under the pump_on=0
-    // convention (current firmware + backfilled old shots), pump_off_at_s
-    // IS pump_time directly — no dwell offset needed.
-    const pumpTimeS = pumpOffAtS;
+    // Headline is pump_time (pump_on → pump_off); pump_off_at_s IS
+    // pump_time under the pump_on=0 frame.
     const pour = chart.pourTime();
-    setElapsed(pumpTimeS ?? pour);
+    setElapsed(pumpOffAtS ?? pour);
     const peak = chart.peakFlow();
     const avg = pour > 0 ? (p.final_weight_g ?? 0) / pour : 0;
-    $('flow-label').textContent = 'avg';
+    flowLabel.textContent = 'avg';
     setFlow(avg);
-    // Compute live brew ratio from the sticky dose so it shows immediately.
-    const sticky = loadSticky();
-    const dose = parseFloat(sticky.bean_weight_g);
+    // Brew ratio uses sticky dose so it shows immediately on shot end.
+    const dose = parseFloat(loadSticky().bean_weight_g);
     const ratioStr = (Number.isFinite(dose) && dose > 0 && p.final_weight_g)
       ? `1:${(p.final_weight_g / dose).toFixed(2)}` : null;
     showStats({
@@ -1413,7 +1317,6 @@ client.on('message', (topic, msg) => {
       peak_flow_g_s: peak,
       brew_ratio_str: ratioStr,
       dwell_s: liveDwellSec,
-      dwell_suspect: liveDwellSec != null && liveDwellSec > 15,
     });
     loadHistory();
   }
@@ -1502,17 +1405,15 @@ function renderHistory(items) {
 function confirmDelete(file) {
   const row = document.querySelector(`#history-list .row[data-file="${CSS.escape(file)}"]`);
   const when = row?.querySelector('.when')?.textContent || file;
-  const yield_ = row?.querySelector('.weight-val')?.textContent || '';
-  const summary = yield_ ? `${when} — ${yield_}` : when;
+  const weight = row?.querySelector('.weight-val')?.textContent || '';
+  const summary = weight ? `${when} — ${weight}` : when;
   if (!confirm(`Delete shot?\n\n${summary}\n\nThis cannot be undone.`)) return;
 
-  // If the deleted shot is currently being replayed (or pinned for compare),
-  // bail back to live so the chart doesn't reference a vanished file.
+  // Drop replay/compare references so the chart doesn't point at a vanished file.
   if (selectedFile === file) backToLive();
   if (compareFile === file) toggleCompare(file);
 
   client.publish('coffee/shot/delete', JSON.stringify({ file }));
-  // Logger needs a tick to remove + rebuild
   setTimeout(loadHistory, 400);
 }
 
@@ -1521,10 +1422,9 @@ function escapeHtml(s) {
 }
 
 // ---------- Decent .shot JSON export ----------
-// Visualizer + the Decent ecosystem all read this format. We have weight
-// (real) and flow (derived); pressure/temperature aren't available so we
-// omit them. Times are normalised to seconds since first drop so the
-// shot opens cleanly in any tool that expects elapsed[] to start at 0.
+// Format readable by Visualizer.coffee and the wider Decent ecosystem.
+// Pressure/temperature aren't available; weight is real and flow is
+// re-derived. Times are normalised to seconds since first drop.
 async function exportDecent(file) {
   try {
     const r = await fetch(`/shots/${encodeURIComponent(file)}`, { cache: 'no-store' });
@@ -1589,9 +1489,8 @@ async function exportDecent(file) {
 }
 
 // ---------- metadata edit modal ----------
-// Bean / grinder / dose / notes per shot. Saved fields persist in
-// localStorage so the form pre-fills with last-used values; the per-shot
-// metadata is published over MQTT and the logger merges it into the file.
+// Bean / grinder / dose / notes per shot, published over MQTT. The
+// bean/grinder fields persist in localStorage so the form pre-fills.
 const STICKY_KEY = 'coffee-telemetry/sticky-metadata';
 const STICKY_FIELDS = ['bean_brand','bean_type','roast_date','roast_level','bean_weight_g','grinder_model','grinder_setting'];
 const editOverlay = $('edit-overlay');
@@ -1668,19 +1567,14 @@ editForm.addEventListener('submit', (e) => {
   saveSticky(metadata);
   client.publish('coffee/shot/metadata/set', JSON.stringify({ file: editingFile, metadata }));
   closeEdit();
-  // Logger needs a tick to write + rebuild index
-  setTimeout(loadHistory, 400);
+  // Logger needs a tick to write + rebuild index.
+  setTimeout(() => { loadHistory(); setShotInfo(loadSticky()); }, 400);
 });
 $('ed-cancel').addEventListener('click', closeEdit);
 editOverlay.addEventListener('click', (e) => { if (e.target === editOverlay) closeEdit(); });
 document.addEventListener('keydown', (e) => {
   if (e.key === 'Escape' && editOverlay.classList.contains('visible')) closeEdit();
 });
-
-// On submit we also refresh the on-screen #shotinfo line so the user sees
-// the new values reflected immediately (especially when editing the live
-// or replayed shot they're currently looking at).
-editForm.addEventListener('submit', () => { setTimeout(() => setShotInfo(loadSticky()), 50); });
 
 // ---------- two-shot compare overlay ----------
 let compareFile = null;
@@ -1716,24 +1610,19 @@ async function replayShot(file) {
     mode = 'replay';
     setBadge('Replay', 'replay');
 
-    const samples = (shot.samples || []).map(s => ({ t: (s.t_ms ?? 0)/1000, w: s.weight_g, f: s.flow_g_s }));
+    const samples = (shot.samples || []).map(s => ({ t: (s.t_ms ?? 0) / 1000, w: s.weight_g, f: 0 }));
     chart.setShot(samples, {
       dwell_s: shot.dwell_s,
-      first_drop_at_ms: shot.first_drop_at_ms,
       acaia_stop_at_s: shot.acaia_stop_at_s,
       pump_off_at_s: shot.pump_off_at_s,
       last_drop_at_s: shot.last_drop_at_s,
     });
     setWeight(shot.final_weight_g ?? 0);
-    // Headline duration prefers pump_time over pour_time. Under the
-    // pump_on=0 convention, pump_off_at_s IS pump_time directly (no
-    // dwell offset needed).
-    const pumpTimeS = shot.pump_off_at_s ?? null;
     const pour = chart.pourTime();
-    setElapsed(pumpTimeS ?? pour);
+    setElapsed(shot.pump_off_at_s ?? pour);
     const peak = chart.peakFlow();
     const avg = pour > 0 ? (shot.final_weight_g ?? 0) / pour : 0;
-    $('flow-label').textContent = 'avg';
+    flowLabel.textContent = 'avg';
     setFlow(avg);
     if (shot.tank_pct_at_start != null) tankV.textContent = Math.round(shot.tank_pct_at_start);
     const dose = parseFloat(shot.metadata?.bean_weight_g);
@@ -1759,7 +1648,7 @@ function backToLive() {
   chart.reset();
   setWeight(0); setElapsed(0); setFlow(0);
   weightV.textContent = '—';
-  $('flow-label').textContent = 'flow';
+  flowLabel.textContent = 'flow';
   hideStats();
   // Show the queued setup so the user can confirm at a glance.
   setShotInfo(loadSticky());
