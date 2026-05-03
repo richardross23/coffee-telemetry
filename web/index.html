@@ -1414,8 +1414,18 @@ function confirmDelete(file) {
   if (selectedFile === file) backToLive();
   if (compareFile === file) toggleCompare(file);
 
-  client.publish('coffee/shot/delete', JSON.stringify({ file }));
-  setTimeout(loadHistory, 400);
+  // QoS 1: same mobile-WS-drop concern as metadata/set.
+  client.publish(
+    'coffee/shot/delete', JSON.stringify({ file }), { qos: 1 },
+    (err) => {
+      if (err) {
+        statusEl.textContent = `delete failed: ${err.message}`;
+        statusEl.className = 'error';
+        return;
+      }
+      setTimeout(loadHistory, 400);
+    },
+  );
 }
 
 function escapeHtml(s) {
@@ -1566,10 +1576,30 @@ editForm.addEventListener('submit', (e) => {
     }
   }
   saveSticky(metadata);
-  client.publish('coffee/shot/metadata/set', JSON.stringify({ file: editingFile, metadata }));
-  closeEdit();
-  // Logger needs a tick to write + rebuild index.
-  setTimeout(() => { loadHistory(); setShotInfo(loadSticky()); }, 400);
+  // QoS 1 + callback: mobile browsers silently drop WS sends after the
+  // tab's been backgrounded; the puback tells us the broker actually
+  // received it. Keep the modal open on failure so the user can retry.
+  const submitBtn = editForm.querySelector('button[type="submit"]');
+  submitBtn.disabled = true;
+  const prevText = submitBtn.textContent;
+  submitBtn.textContent = 'Saving…';
+  client.publish(
+    'coffee/shot/metadata/set',
+    JSON.stringify({ file: editingFile, metadata }),
+    { qos: 1 },
+    (err) => {
+      submitBtn.disabled = false;
+      submitBtn.textContent = prevText;
+      if (err) {
+        statusEl.textContent = `save failed: ${err.message}`;
+        statusEl.className = 'error';
+        return;
+      }
+      closeEdit();
+      // Logger needs a tick to write + rebuild index.
+      setTimeout(() => { loadHistory(); setShotInfo(loadSticky()); }, 400);
+    },
+  );
 });
 $('ed-cancel').addEventListener('click', closeEdit);
 editOverlay.addEventListener('click', (e) => { if (e.target === editOverlay) closeEdit(); });
