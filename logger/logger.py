@@ -6,9 +6,10 @@ coffee/scale/weight for a rolling pre-shot buffer that gets prepended to
 each saved file (so replay shows the same scale lead-in the live dashboard
 shows). Also handles coffee/shot/metadata/set and coffee/shot/delete edits.
 
-Reassembles coffee/shot/raw chunks into a "raw" key on the saved shot
-file (or as a standalone capture in shots/_raw/ for aborts). Wire format
-documented in attach_raw().
+Reassembles coffee/shot/raw chunks into shots/_raw_archive/<id>.json as
+belt-and-braces backup of the device's own canonical raw archive. Never
+read by the dashboard; safe to delete the directory once device-side
+retrieval is trusted.
 """
 
 import datetime
@@ -371,18 +372,18 @@ _MS_FIELDS = (
 )
 
 
-# --- Raw-capture reassembly --------------------------------------------------
+# --- Raw-capture archive -----------------------------------------------------
 # Firmware publishes coffee/shot/raw as `<shot_id>|<idx>|<total>|<bytes>`
 # chunks (~3.5 KB each); concatenated payloads JSON-decode to the full
-# accel + weight + events trace. Real shots get the parsed JSON inlined
-# as a "raw" key on their saved file. Aborts (and any raw arriving with
-# no parent shot) are kept in shots/_raw/<shot_id>.json for offline
-# pump-off-detection analysis.
+# accel + weight + events trace. The device also stores these to its own
+# flash and serves them at /shots/<id>.json — the device is canonical;
+# this MQTT path is belt-and-braces backup. Reassembled JSON lands in
+# shots/_raw_archive/<id>.json and is never read by the dashboard. Safe
+# to delete the directory entirely once device-side retrieval is trusted.
 
-RAW_DIR = "_raw"
+RAW_ARCHIVE_DIR = "_raw_archive"
 RAW_TTL_SEC = 120.0
-_raw_chunks: dict[str, dict] = {}     # shot_id -> {chunks: {idx: bytes}, total: int, ts: float}
-_raw_pending: dict[str, dict] = {}    # shot_id -> {raw: dict, ts: float}
+_raw_chunks: dict[str, dict] = {}    # shot_id -> {chunks: {idx: bytes}, total: int, ts: float}
 
 
 def handle_raw_chunk(payload: bytes) -> None:
@@ -415,52 +416,18 @@ def handle_raw_chunk(payload: bytes) -> None:
     except json.JSONDecodeError as e:
         log.warning("raw %s: bad JSON after reassembly: %s", shot_id, e)
         return
-
-    target = _shot_file_for(shot_id)
-    if target is None:
-        # Either the shot file hasn't been written yet (raw arrived
-        # first) or this was an abort. Stash; handle_shot_end will pick
-        # it up if the shot lands soon, otherwise eviction saves it as
-        # a standalone capture.
-        _raw_pending[shot_id] = {"raw": raw, "ts": time.time()}
-        return
-    _attach_raw(target, raw)
-    log.info("raw %s attached to %s", shot_id, target)
+    _save_raw_archive(shot_id, raw)
 
 
-def _shot_file_for(shot_id: str) -> str | None:
-    sid = str(shot_id)
-    for name, entry in _index.items():
-        if str(entry.get("shot_id", "")) == sid:
-            return name
-    return None
-
-
-def _attach_raw(name: str, raw: dict) -> None:
-    """Read shot file, set data['raw'] = raw, atomic write back."""
-    path = os.path.join(OUT, name)
-    try:
-        with open(path) as f:
-            data = json.load(f)
-    except (OSError, json.JSONDecodeError) as e:
-        log.warning("raw: read %s failed: %s", name, e)
-        return
-    data["raw"] = raw
-    tmp = path + ".tmp"
-    with open(tmp, "w") as f:
-        json.dump(data, f, indent=2)
-    os.replace(tmp, path)
-
-
-def _save_orphan_raw(shot_id: str, raw: dict) -> None:
-    raw_dir = os.path.join(OUT, RAW_DIR)
+def _save_raw_archive(shot_id: str, raw: dict) -> None:
+    raw_dir = os.path.join(OUT, RAW_ARCHIVE_DIR)
     os.makedirs(raw_dir, exist_ok=True)
     path = os.path.join(raw_dir, f"{shot_id}.json")
     tmp = path + ".tmp"
     with open(tmp, "w") as f:
         json.dump(raw, f, indent=2)
     os.replace(tmp, path)
-    log.info("raw %s saved to %s/", shot_id, RAW_DIR)
+    log.info("raw %s archived (%d bytes)", shot_id, os.path.getsize(path))
 
 
 def _evict_stale_raw() -> None:
@@ -468,22 +435,13 @@ def _evict_stale_raw() -> None:
     for sid in [k for k, v in _raw_chunks.items() if v["ts"] < cutoff]:
         log.warning("raw %s: incomplete after %.0fs, dropping", sid, RAW_TTL_SEC)
         del _raw_chunks[sid]
-    for sid in [k for k, v in _raw_pending.items() if v["ts"] < cutoff]:
-        # Pending raw with no shot file after TTL: persist as orphan
-        # so the data isn't lost (this is the abort path most of the time).
-        _save_orphan_raw(sid, _raw_pending.pop(sid)["raw"])
 
 
 def handle_shot_end(shot_id: str, payload: dict) -> None:
     # Firmware aborts (backflush, blind basket, descale, accidental
     # lever-bump): drop without running our heuristic tare filter.
-    # The raw capture is still useful as calibration data — persist it
-    # as a standalone orphan if it's already reassembled.
     if payload.get("aborted"):
         shots_in_flight.pop(shot_id, None)
-        pending = _raw_pending.pop(shot_id, None)
-        if pending:
-            _save_orphan_raw(shot_id, pending["raw"])
         log.info(
             "dropped shot %s: aborted by firmware (reason=%s, duration=%ss, weight=%sg)",
             shot_id,
@@ -533,23 +491,15 @@ def handle_shot_end(shot_id: str, payload: dict) -> None:
     if inherited:
         record.setdefault("metadata", inherited)
 
-    # Inline raw capture if it's already reassembled — saves a re-write
-    # later. If raw arrives after this point, the chunk handler patches
-    # the file via _attach_raw().
-    pending = _raw_pending.pop(shot_id, None)
-    if pending:
-        record["raw"] = pending["raw"]
-
     safe_id = re.sub(r"[^A-Za-z0-9_-]+", "_", shot_id)
     name = f"{utc_iso()}_{safe_id}.json"
     path = os.path.join(OUT, name)
     with open(path, "w") as f:
         json.dump(record, f, indent=2)
     log.info(
-        "saved %s (%d samples, %sg in %ss%s)",
+        "saved %s (%d samples, %sg in %ss)",
         name, len(record.get("samples", [])),
         record.get("final_weight_g"), record.get("duration_s"),
-        ", raw" if pending else "",
     )
     update_index(name)
 
