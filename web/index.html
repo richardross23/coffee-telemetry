@@ -421,8 +421,26 @@
     #tank-widget { padding: 4px 8px; font-size: 10px; }
     #status { font-size: 10px; flex-basis: 100%; text-align: right; }
 
-    #stage { padding: 14px 16px; }
-    #hero { top: 14px; left: 16px; right: 16px; }
+    /* On mobile: ditch the chart-overlay layout. Stack hero ABOVE the
+       chart in normal flow so the curve isn't hidden behind the
+       backdrop. Chart-wrap takes remaining vertical space. */
+    #stage {
+      padding: 14px 16px;
+      display: flex; flex-direction: column; gap: 10px;
+    }
+    #hero {
+      position: static;
+      top: auto; left: auto; right: auto;
+      background: none;
+      backdrop-filter: none;
+      -webkit-backdrop-filter: none;
+      padding: 0; margin: 0; border-radius: 0;
+      flex-shrink: 0;
+    }
+    #chart-wrap {
+      position: relative; inset: auto;
+      flex: 1 1 auto; min-height: 240px;
+    }
     #weight { font-size: 72px; }
     #weight .unit { font-size: 18px; }
     /* Phone layout: graph leaves the upper-left empty, so stack stats
