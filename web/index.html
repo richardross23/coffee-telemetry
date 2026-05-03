@@ -444,29 +444,26 @@
       grid-template-columns: auto 1fr;
       grid-template-areas:
         "weight headline"
-        "weight diag"
+        "diag   diag"
         "info   info";
       column-gap: 18px;
-      row-gap: 4px;
-      align-items: start;
+      row-gap: 8px;
+      align-items: center;
     }
     #weight { grid-area: weight; }
     #hero-headline {
       grid-area: headline;
-      align-self: start;
+      align-self: center;
       margin-top: 0;
     }
-    #hero-diagnostic {
-      grid-area: diag;
-      margin-top: 4px;
-    }
-    #shotinfo { grid-area: info; }
+    #hero-diagnostic { grid-area: diag; margin-top: 0; }
+    #shotinfo       { grid-area: info; margin-top: 0; }
     #chart-wrap {
       position: relative; inset: auto;
       flex: 1 1 auto; min-height: 240px;
     }
-    #weight { font-size: 72px; }
-    #weight .unit { font-size: 18px; }
+    #weight { font-size: 60px; }
+    #weight .unit { font-size: 16px; }
     /* Phone layout: graph leaves the upper-left empty, so stack stats
        vertically on the LEFT and use the available column instead of
        cramming three big numbers horizontally. */
@@ -487,16 +484,18 @@
     }
     .hvalue { font-size: 22px; }
 
+    /* DWELL + PEAK inline on one row instead of stacked — saves a row
+       of vertical space, both still fit comfortably in the width. */
     #hero-diagnostic {
-      margin-top: 10px; font-size: 11px; gap: 3px 14px;
-      flex-direction: column; align-items: flex-start;
+      margin-top: 6px; font-size: 11px; gap: 4px 18px;
+      flex-direction: row; flex-wrap: wrap; align-items: baseline;
     }
     #hero-diagnostic > span { gap: 6px; }
 
     /* Setup groups stack on their own lines on phones. */
     #shotinfo {
-      margin-top: 12px;
-      flex-direction: column; gap: 4px;
+      margin-top: 6px;
+      flex-direction: column; gap: 2px;
     }
     /* Bean group: secondary descriptors (Nd off roast · level) wrap
        to their own line under the primary identity (brand · type),
