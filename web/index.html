@@ -1396,10 +1396,13 @@ function renderHistory(items) {
   }
   historyList.innerHTML = items.map(it => {
     const when = formatWhen(it.saved_at) || it.file;
-    const dt = it.pour_time_s ?? it.duration_s;
+    // Prefer pump_time (pump_on → pump_off) — the canonical barista
+    // shot duration, same as the receipt's ELAPSED. Fall back to pour
+    // time, then firmware duration, for legacy shots without pump data.
+    const dt = it.pump_time_s ?? it.pour_time_s ?? it.duration_s;
     const dur = dt != null ? `${dt.toFixed(1)} s` : '—';
     const wt = it.final_weight_g != null ? `${it.final_weight_g.toFixed(1)}<span class="u">g</span>` : '—';
-    const avg = (it.final_weight_g && it.pour_time_s) ? it.final_weight_g / it.pour_time_s : null;
+    const avg = (it.final_weight_g && dt) ? it.final_weight_g / dt : null;
     const avgStr = avg != null ? `${avg.toFixed(2)} g/s avg` : '';
     const tank = it.tank_pct_at_start != null ? `tank ${Math.round(it.tank_pct_at_start)}%` : '';
     const meta = [avgStr, tank].filter(Boolean).join(' · ');
