@@ -1362,7 +1362,8 @@ function renderHistory(items) {
     const avg = (it.final_weight_g && dt) ? it.final_weight_g / dt : null;
     const avgStr = avg != null ? `${avg.toFixed(2)} g/s avg` : '';
     const tank = it.tank_pct_at_start != null ? `tank ${Math.round(it.tank_pct_at_start)}%` : '';
-    const meta = [avgStr, tank].filter(Boolean).join(' · ');
+    const dwell = (it.dwell_s != null && it.dwell_s > 0) ? `${it.dwell_s.toFixed(1)}s dwell` : '';
+    const meta = [dwell, avgStr, tank].filter(Boolean).join(' · ');
     const sel = it.file === selectedFile ? ' selected' : '';
     const isCompare = compareFile === it.file;
     const meta2parts = [];
