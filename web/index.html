@@ -444,19 +444,23 @@
       grid-template-columns: auto 1fr;
       grid-template-areas:
         "weight headline"
-        "diag   diag"
+        "weight diag"
         "info   info";
       column-gap: 18px;
+      row-gap: 4px;
       align-items: start;
     }
     #weight { grid-area: weight; }
     #hero-headline {
       grid-area: headline;
-      align-self: center;
+      align-self: start;
       margin-top: 0;
     }
-    #hero-diagnostic { grid-area: diag; }
-    #shotinfo       { grid-area: info; }
+    #hero-diagnostic {
+      grid-area: diag;
+      margin-top: 4px;
+    }
+    #shotinfo { grid-area: info; }
     #chart-wrap {
       position: relative; inset: auto;
       flex: 1 1 auto; min-height: 240px;
