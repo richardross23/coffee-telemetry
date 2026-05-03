@@ -436,7 +436,27 @@
       -webkit-backdrop-filter: none;
       padding: 0; margin: 0; border-radius: 0;
       flex-shrink: 0;
+      /* Two-column on mobile: big weight number on the left, the
+         RATIO/ELAPSED/AVG stack rides on its right shoulder. Pulls
+         diagnostic + setup info upward and gives the chart more
+         headroom. */
+      display: grid;
+      grid-template-columns: auto 1fr;
+      grid-template-areas:
+        "weight headline"
+        "diag   diag"
+        "info   info";
+      column-gap: 18px;
+      align-items: start;
     }
+    #weight { grid-area: weight; }
+    #hero-headline {
+      grid-area: headline;
+      align-self: center;
+      margin-top: 0;
+    }
+    #hero-diagnostic { grid-area: diag; }
+    #shotinfo       { grid-area: info; }
     #chart-wrap {
       position: relative; inset: auto;
       flex: 1 1 auto; min-height: 240px;
