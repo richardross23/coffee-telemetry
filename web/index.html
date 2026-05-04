@@ -1473,14 +1473,20 @@ async function exportDecent(file) {
 
     const elapsed = samples.map(s => +(s.t - t0).toFixed(2));
     const weight = samples.map(s => +s.w.toFixed(2));
+    // Decent .shot JSON schema: top-level espresso_* parallel arrays.
+    // We have weight (real) and flow (derived); pressure/temperature
+    // aren't available. espresso_flow_weight mirrors espresso_flow
+    // since our only flow source IS the scale.
+    const clock = Math.floor(Date.parse(shot.saved_at || new Date().toISOString()) / 1000)
+                  || Math.floor(Date.now() / 1000);
     const decent = {
-      clock: Math.floor(Date.parse(shot.saved_at || new Date().toISOString()) / 1000) || Math.floor(Date.now() / 1000),
-      timestamp: Math.floor(Date.parse(shot.saved_at || new Date().toISOString()) / 1000) || Math.floor(Date.now() / 1000),
+      clock,
+      timestamp: clock,
       espresso_elapsed: elapsed,
-      elapsed,
-      flow: { flow, by_weight: flow },
-      totals: { weight },
-      profile: { title: 'coffee-tank' },
+      espresso_weight: weight,
+      espresso_flow: flow,
+      espresso_flow_weight: flow,
+      profile_title: 'coffee-tank',
       espresso_notes: `Captured by coffee-telemetry. Yield ${shot.final_weight_g ?? '?'}g · pour ${(shot.pour_time_s ?? shot.duration_s ?? '?')}s · tank ${shot.tank_pct_at_start ?? '?'}%`,
     };
 
