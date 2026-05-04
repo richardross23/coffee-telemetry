@@ -213,11 +213,13 @@ def _read_shot(path: str) -> dict | None:
 
 
 def index_scan() -> None:
-    """One-time disk scan at startup."""
+    """One-time disk scan at startup. Only timestamped files (the
+    coffee/shot/end summaries) are indexed for history; raw archives
+    saved as bare <shot_id>.json by the ack handshake are skipped."""
     _index.clear()
     for path in glob.glob(os.path.join(OUT, "*.json")):
         name = os.path.basename(path)
-        if name == INDEX:
+        if name == INDEX or not FILENAME_TS_RE.match(name):
             continue
         data = _read_shot(path)
         if data is not None:
@@ -280,7 +282,8 @@ def on_connect(client, userdata, flags, rc, properties=None):
         return
     log.info("connected to %s:%s", BROKER, PORT)
     client.subscribe([
-        (T_START, 0), (T_SAMPLE, 0), (T_END, 0), (T_RAW, 0),
+        (T_START, 0), (T_SAMPLE, 0), (T_END, 0),
+        (T_RAW, 0), (T_RAW_COMPLETE, 1),  # complete is QoS 1: ack handshake
         (T_SCALE_W, 0), (T_META_SET, 0), (T_DELETE, 0),
     ])
 
@@ -374,18 +377,22 @@ _MS_FIELDS = (
 )
 
 
-# --- Raw-capture archive -----------------------------------------------------
-# Firmware publishes coffee/shot/raw as `<shot_id>|<idx>|<total>|<bytes>`
-# chunks (~3.5 KB each); concatenated payloads JSON-decode to the full
-# accel + weight + events trace. The device also stores these to its own
-# flash and serves them at /shots/<id>.json — the device is canonical;
-# this MQTT path is belt-and-braces backup. Reassembled JSON lands in
-# shots/_raw_archive/<id>.json and is never read by the dashboard. Safe
-# to delete the directory entirely once device-side retrieval is trusted.
+# --- Raw-capture archive (ack-handshaked) ------------------------------------
+# Firmware publishes per-shot raw data in two phases:
+#   1. coffee/shot/raw (QoS 0): chunks `<shot_id>|<idx>|<total>|<bytes>`,
+#      ~3.5 KB each, concatenated payload is the full JSON trace.
+#   2. coffee/shot/raw/complete (QoS 1): {"shot_id", "chunks", "bytes"}
+#      — the signal that the device has finished sending. Only on
+#      receipt of this marker do we validate, persist, and ack.
+#
+# We publish coffee/shot/ack/<shot_id> (QoS 1) AFTER a successful disk
+# write. The device retains its local copy until acked and replays the
+# whole shot on reconnect if anything went wrong, so partial state
+# here is never persisted.
 
-RAW_ARCHIVE_DIR = "_raw_archive"
+T_RAW_COMPLETE = "coffee/shot/raw/complete"
 RAW_TTL_SEC = 120.0
-_raw_chunks: dict[str, dict] = {}    # shot_id -> {chunks: {idx: bytes}, total: int, ts: float}
+_raw_chunks: dict[str, dict] = {}    # shot_id -> {chunks: {idx: bytes}, ts: float}
 
 
 def handle_raw_chunk(payload: bytes) -> None:
@@ -396,40 +403,57 @@ def handle_raw_chunk(payload: bytes) -> None:
     try:
         shot_id = parts[0].decode("ascii")
         idx = int(parts[1])
-        total = int(parts[2])
     except (ValueError, UnicodeDecodeError):
         log.warning("raw: bad header %r", payload[:80])
         return
 
-    bucket = _raw_chunks.setdefault(
-        shot_id, {"chunks": {}, "total": total, "ts": time.time()}
-    )
+    bucket = _raw_chunks.setdefault(shot_id, {"chunks": {}, "ts": time.time()})
     bucket["chunks"][idx] = parts[3]
-    bucket["total"] = total
     _evict_stale_raw()
 
-    if len(bucket["chunks"]) < total:
-        return
 
-    del _raw_chunks[shot_id]
-    body = b"".join(bucket["chunks"][i] for i in range(total))
+def handle_raw_complete(client, payload: bytes) -> None:
+    try:
+        marker = json.loads(payload)
+    except json.JSONDecodeError as e:
+        log.warning("raw/complete: bad JSON: %s", e)
+        return
+    shot_id = marker.get("shot_id")
+    expected_chunks = marker.get("chunks")
+    expected_bytes = marker.get("bytes")
+    if shot_id is None or expected_chunks is None or expected_bytes is None:
+        log.warning("raw/complete: missing fields in %r", marker)
+        return
+    sid = str(shot_id)
+    bucket = _raw_chunks.pop(sid, None)
+    have = len(bucket["chunks"]) if bucket else 0
+    if have != expected_chunks:
+        log.warning("raw %s: have %d/%d chunks, not acking (device will retry)",
+                    sid, have, expected_chunks)
+        return
+    body = b"".join(bucket["chunks"][i] for i in range(expected_chunks))
+    if len(body) != expected_bytes:
+        log.warning("raw %s: byte mismatch (got %d, expected %d), not acking",
+                    sid, len(body), expected_bytes)
+        return
     try:
         raw = json.loads(body)
     except (json.JSONDecodeError, UnicodeDecodeError) as e:
-        log.warning("raw %s: parse failed (%d bytes): %s", shot_id, len(body), e)
+        log.warning("raw %s: parse failed (%s), not acking", sid, e)
         return
-    _save_raw_archive(shot_id, raw)
-
-
-def _save_raw_archive(shot_id: str, raw: dict) -> None:
-    raw_dir = os.path.join(OUT, RAW_ARCHIVE_DIR)
-    os.makedirs(raw_dir, exist_ok=True)
-    path = os.path.join(raw_dir, f"{shot_id}.json")
+    # Disk write must succeed BEFORE we ack — the device deletes its
+    # local copy on ack receipt, so an ack-then-fail leaves no trace.
+    path = os.path.join(OUT, f"{sid}.json")
     tmp = path + ".tmp"
-    with open(tmp, "w") as f:
-        json.dump(raw, f, indent=2)
-    os.replace(tmp, path)
-    log.info("raw %s archived (%d bytes)", shot_id, os.path.getsize(path))
+    try:
+        with open(tmp, "w") as f:
+            json.dump(raw, f, indent=2)
+        os.replace(tmp, path)
+    except OSError as e:
+        log.error("raw %s: write failed (%s), not acking", sid, e)
+        return
+    client.publish(f"coffee/shot/ack/{sid}", b"", qos=1)
+    log.info("raw %s: archived (%d bytes), acked", sid, len(body))
 
 
 def _evict_stale_raw() -> None:
@@ -512,6 +536,9 @@ def on_message(client, userdata, msg):
         return
     if msg.topic == T_RAW:
         handle_raw_chunk(msg.payload)
+        return
+    if msg.topic == T_RAW_COMPLETE:
+        handle_raw_complete(client, msg.payload)
         return
 
     try:
