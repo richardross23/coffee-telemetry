@@ -800,9 +800,15 @@ function splinePath(pts) {
     const p3 = pts[i + 2] || p2;
     // Catmull-Rom → cubic Bezier control points (tension = 0.5).
     const c1x = p1[0] + (p2[0] - p0[0]) / 6;
-    const c1y = p1[1] + (p2[1] - p0[1]) / 6;
+    let   c1y = p1[1] + (p2[1] - p0[1]) / 6;
     const c2x = p2[0] - (p3[0] - p1[0]) / 6;
-    const c2y = p2[1] - (p3[1] - p1[1]) / 6;
+    let   c2y = p2[1] - (p3[1] - p1[1]) / 6;
+    // Clamp control y-coords to the segment's own range to prevent
+    // visual overshoot when neighbouring points have steep slopes.
+    const yMin = Math.min(p1[1], p2[1]);
+    const yMax = Math.max(p1[1], p2[1]);
+    if (c1y < yMin) c1y = yMin; else if (c1y > yMax) c1y = yMax;
+    if (c2y < yMin) c2y = yMin; else if (c2y > yMax) c2y = yMax;
     d += ` C${c1x.toFixed(1)} ${c1y.toFixed(1)} ${c2x.toFixed(1)} ${c2y.toFixed(1)} ${p2[0].toFixed(1)} ${p2[1].toFixed(1)}`;
   }
   return d;
@@ -920,6 +926,7 @@ class ShotChart {
     this.samples = (samples || []).filter(s => Number.isFinite(s.t) && Number.isFinite(s.w));
     this.meta = meta || {};
     this.flowSmoothed = 0;
+    this._lastGapIdx = 0;
     for (let i = 0; i < this.samples.length; i++) this._deriveFlowAt(i);
     this._updateBounds();
     this.render();
@@ -932,7 +939,7 @@ class ShotChart {
     this.render();
   }
   setMeta(meta) { Object.assign(this.meta, meta); this.render(); }
-  reset() { this.samples = []; this.meta = {}; this.flowSmoothed = 0; this.compareSamples = null; this.render(); }
+  reset() { this.samples = []; this.meta = {}; this.flowSmoothed = 0; this._lastGapIdx = 0; this.compareSamples = null; this.render(); }
 
   // Set/clear a second shot for overlay compare. Samples are normalised
   // so the compare curve's first-drop aligns with the primary's first-drop.
@@ -967,15 +974,35 @@ class ShotChart {
   }
 
   // Sliding-window derivative + EMA smoothing. Mutates samples[i].f.
-  // Negative gusts clamp to 0 (drips landing unevenly).
-  // Anything above flowMaxG (~espresso physics) is REJECTED entirely —
-  // the EMA holds its previous value through the glitch, so the trace
-  // stays smooth instead of spiking up to the cap and back.
+  // Negative gusts clamp to 0; anything above flowMaxG is rejected
+  // (EMA holds previous value through the glitch).
+  //
+  // BLE jitter handling: Acaia occasionally pauses transmission for
+  // a few hundred ms then dumps queued samples in a sub-50ms burst.
+  // Without special-casing, the post-gap sample sees a 1s window
+  // spanning the gap and reports an inflated rate; we reset on >400ms
+  // gaps and pin the window's lookback to the most recent gap so the
+  // next few samples don't keep inheriting the pre-gap baseline.
   _deriveFlowAt(i) {
     const s = this.samples[i];
+    const prev = i > 0 ? this.samples[i - 1] : null;
+    if (prev) {
+      const gap = s.t - prev.t;
+      // BLE jitter handling. Big gaps and bursts both pin the window
+      // floor here so the next normal sample's window doesn't reach
+      // back across the disturbance. The flow value holds at the
+      // previous EMA — visually continuous, but the gap effectively
+      // doesn't contribute to the rate calc.
+      if (gap > 0.4 || gap < 0.05) {
+        this._lastGapIdx = i;
+        s.f = this.flowSmoothed;
+        return;
+      }
+    }
     const tStart = s.t - this.flowWindowS;
+    const floor = this._lastGapIdx ?? 0;
     let j = i;
-    while (j > 0 && this.samples[j - 1].t >= tStart) j--;
+    while (j > floor && this.samples[j - 1].t >= tStart) j--;
     const dT = s.t - this.samples[j].t;
     const dW = s.w - this.samples[j].w;
     const raw = dT > 0 ? dW / dT : 0;
@@ -983,7 +1010,6 @@ class ShotChart {
       const clamped = Math.max(0, raw);
       this.flowSmoothed = this.flowEma * clamped + (1 - this.flowEma) * this.flowSmoothed;
     }
-    // else: outlier — leave flowSmoothed alone, sample inherits previous value
     s.f = this.flowSmoothed;
   }
 
