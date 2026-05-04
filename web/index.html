@@ -273,6 +273,24 @@
     box-shadow: -16px 0 48px rgba(0,0,0,0.5);
   }
   main.history-open #history { transform: translateX(0); }
+
+  /* Wide screens: history is permanently docked on the right rather
+     than a slide-in panel. main becomes a two-column layout, the
+     history tab + close button hide since there's nothing to toggle. */
+  @media (min-width: 1200px) {
+    main {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) 340px;
+    }
+    #history {
+      position: static;
+      transform: none; transition: none;
+      box-shadow: none; width: auto;
+      top: auto; right: auto; bottom: auto; z-index: auto;
+    }
+    #close-history { display: none; }
+    .tab[data-mode="history"] { display: none; }
+  }
   #history-header {
     padding: 14px 18px; font-size: 10px; color: var(--dim);
     text-transform: uppercase; letter-spacing: 0.14em;
