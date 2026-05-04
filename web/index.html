@@ -1471,52 +1471,47 @@ async function exportDecent(file) {
       flow.push(+smoothed.toFixed(3));
     }
 
-    const elapsed = samples.map(s => +(s.t - t0).toFixed(2));
-    const weight = samples.map(s => +s.w.toFixed(2));
-    // Decent .shot JSON schema: top-level espresso_* parallel arrays
-    // for the trace, plus flat metadata fields. We have weight (real)
-    // and flow (derived). Pressure/temperature/goals aren't available
-    // but Visualizer.coffee calls .size on every standard array, so
-    // the missing ones get zero-filled to the same length.
+    // Visualizer.coffee's DecentJson parser (miharekar/visualizer) reads
+    // a nested schema: elapsed at top level, then flow/pressure/
+    // temperature/totals as objects keyed by sub-trace. Values are
+    // string-formatted floats. Settings live under app.data.settings
+    // and are extracted by EXTRA_DATA_CAPTURE.
+    const fixed2 = (v) => (+v).toFixed(2);
+    const fixed3 = (v) => (+v).toFixed(3);
+    const elapsed = samples.map(s => fixed3(s.t - t0));
+    const weight = samples.map(s => fixed2(s.w));
+    const flowStr = flow.map(fixed3);
     const n = elapsed.length;
-    const zeros = new Array(n).fill(0);
+    const zeros = new Array(n).fill('0.0');
     const clock = Math.floor(Date.parse(shot.saved_at || new Date().toISOString()) / 1000)
                   || Math.floor(Date.now() / 1000);
     const meta = shot.metadata || {};
+    const dose = meta.ground_weight_g ?? meta.bean_weight_g;
+    const settings = {
+      espresso_notes: meta.notes
+        || `Captured by coffee-telemetry. Tank ${shot.tank_pct_at_start ?? '?'}%`,
+    };
+    if (meta.bean_brand) settings.bean_brand = meta.bean_brand;
+    if (meta.bean_type) settings.bean_type = meta.bean_type;
+    if (meta.roast_date) settings.roast_date = meta.roast_date;
+    if (meta.roast_level) settings.roast_level = meta.roast_level;
+    if (dose != null) settings.bean_weight = String(+dose);
+    if (shot.final_weight_g != null) settings.drink_weight = String(shot.final_weight_g);
+    if (meta.grinder_model) settings.grinder_model = meta.grinder_model;
+    if (meta.grinder_setting) settings.grinder_setting = meta.grinder_setting;
+
     const decent = {
       clock,
       timestamp: clock,
-      espresso_elapsed: elapsed,
-      espresso_weight: weight,
-      espresso_flow: flow,
-      espresso_flow_weight: flow,
-      espresso_flow_weight_raw: flow,
-      espresso_pressure: zeros,
-      espresso_pressure_goal: zeros,
-      espresso_flow_goal: zeros,
-      espresso_temperature_basket: zeros,
-      espresso_temperature_mix: zeros,
-      espresso_temperature_goal: zeros,
-      espresso_resistance: zeros,
-      espresso_resistance_weight: zeros,
-      espresso_state_change: zeros,
-      profile_title: 'coffee-tank',
+      elapsed,
+      flow: { flow: flowStr, by_weight: flowStr, by_weight_raw: flowStr, goal: zeros },
+      pressure: { pressure: zeros, goal: zeros },
+      temperature: { basket: zeros, mix: zeros, goal: zeros },
+      totals: { weight, water_dispensed: zeros },
+      state_change: zeros,
+      profile: { title: 'coffee-tank' },
+      app: { data: { settings } },
     };
-    // Bean / grinder / dose metadata — Visualizer reads these top-level.
-    // ground_weight_g (from grinder log) is preferred over bean_weight_g
-    // (manual entry) when both are present.
-    if (meta.bean_brand) decent.bean_brand = meta.bean_brand;
-    if (meta.bean_type) decent.bean_type = meta.bean_type;
-    if (meta.roast_date) decent.roast_date = meta.roast_date;
-    if (meta.roast_level) decent.roast_level = meta.roast_level;
-    const dose = meta.ground_weight_g ?? meta.bean_weight_g;
-    if (dose != null) decent.bean_weight = +(+dose).toFixed(2);
-    if (shot.final_weight_g != null) decent.drink_weight = +shot.final_weight_g.toFixed(2);
-    if (meta.grinder_model) decent.grinder_model = meta.grinder_model;
-    if (meta.grinder_setting) decent.grinder_setting = meta.grinder_setting;
-    // espresso_notes: user notes if present, otherwise a capture summary.
-    decent.espresso_notes = meta.notes
-      || `Captured by coffee-telemetry. Tank ${shot.tank_pct_at_start ?? '?'}%`;
 
     const blob = new Blob([JSON.stringify(decent, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
