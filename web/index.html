@@ -1474,9 +1474,12 @@ async function exportDecent(file) {
     const elapsed = samples.map(s => +(s.t - t0).toFixed(2));
     const weight = samples.map(s => +s.w.toFixed(2));
     // Decent .shot JSON schema: top-level espresso_* parallel arrays
-    // for the trace, plus flat metadata fields. Pressure/temperature
-    // aren't available; espresso_flow_weight mirrors espresso_flow
-    // since our only flow source IS the scale.
+    // for the trace, plus flat metadata fields. We have weight (real)
+    // and flow (derived). Pressure/temperature/goals aren't available
+    // but Visualizer.coffee calls .size on every standard array, so
+    // the missing ones get zero-filled to the same length.
+    const n = elapsed.length;
+    const zeros = new Array(n).fill(0);
     const clock = Math.floor(Date.parse(shot.saved_at || new Date().toISOString()) / 1000)
                   || Math.floor(Date.now() / 1000);
     const meta = shot.metadata || {};
@@ -1487,6 +1490,16 @@ async function exportDecent(file) {
       espresso_weight: weight,
       espresso_flow: flow,
       espresso_flow_weight: flow,
+      espresso_flow_weight_raw: flow,
+      espresso_pressure: zeros,
+      espresso_pressure_goal: zeros,
+      espresso_flow_goal: zeros,
+      espresso_temperature_basket: zeros,
+      espresso_temperature_mix: zeros,
+      espresso_temperature_goal: zeros,
+      espresso_resistance: zeros,
+      espresso_resistance_weight: zeros,
+      espresso_state_change: zeros,
       profile_title: 'coffee-tank',
     };
     // Bean / grinder / dose metadata — Visualizer reads these top-level.
