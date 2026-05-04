@@ -46,12 +46,14 @@ META_ALLOWED_FIELDS = frozenset({
     "grinder_model", "grinder_setting",
     "ground_weight_g", "grind_duration_s", "grinder_recipe",
     "notes",
+    "enjoyment",
 })
 
 # Fields that don't auto-inherit from the previous shot (per-shot only).
 META_INHERIT_EXCLUDE = frozenset({
     "notes",
     "ground_weight_g", "grind_duration_s", "grinder_recipe",
+    "enjoyment",
 })
 
 INDEX = "index.json"

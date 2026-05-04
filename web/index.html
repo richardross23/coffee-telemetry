@@ -182,6 +182,16 @@
     cursor: crosshair;
   }
 
+  /* phase labels — small caps text alongside each phase marker line */
+  .phase-labels text {
+    font: 500 9px 'Inter', sans-serif;
+    letter-spacing: 0.12em; text-transform: uppercase;
+    fill: var(--dim);
+  }
+  .phase-labels text.pump-on,    .phase-labels text.first-drop  { fill: var(--copper); }
+  .phase-labels text.pump-off    { fill: var(--warn); }
+  .phase-labels text.last-drop   { fill: var(--cream); opacity: 0.75; }
+
   /* hover tooltip */
   #tooltip {
     position: absolute; pointer-events: none; z-index: 20;
@@ -199,6 +209,12 @@
   #tooltip .v.weight { color: var(--copper-bright); }
   #tooltip .v.flow { color: var(--cream); }
   #tooltip .v.t { color: var(--fg); }
+  #tooltip .tt-compare {
+    margin-top: 6px; padding-top: 6px;
+    border-top: 1px solid var(--line);
+  }
+  #tooltip .tt-compare .row .k { color: var(--warn); }
+  #tooltip .tt-compare .row.tt-divider .v { display: none; }
 
   /* Tier 2 stats fade in as their data arrives. */
   #hero-diagnostic > span {
@@ -290,7 +306,9 @@
   }
   .row .when {
     font-size: 10px; color: var(--dim); letter-spacing: 0.06em; text-transform: uppercase;
+    display: flex; justify-content: space-between; align-items: baseline;
   }
+  .row .when .stars { font-size: 11px; letter-spacing: 0; }
   .row .top {
     display: flex; justify-content: space-between; align-items: baseline; margin-top: 2px;
   }
@@ -327,6 +345,7 @@
   .row .meta-line .ratio { color: var(--copper-bright); font-variant-numeric: tabular-nums; font-weight: 500; }
   .row .meta-line .grind  { color: var(--cream); font-variant-numeric: tabular-nums; }
   .row .meta-line .roast { color: var(--dim); }
+  .row .meta-line .bag { color: var(--good); font-variant-numeric: tabular-nums; }
 
   /* Edit metadata modal */
   #edit-overlay {
@@ -390,6 +409,23 @@
     background: var(--copper); color: var(--bg-0); border-color: var(--copper);
   }
   #edit-modal button.primary:hover { background: var(--copper-bright); border-color: var(--copper-bright); }
+  #edit-modal .star-input { display: inline-flex; align-items: center; gap: 2px; }
+  #edit-modal .star-input button {
+    background: none; border: none; padding: 2px 4px;
+    color: var(--line-bright); font-size: 20px; line-height: 1;
+    cursor: pointer; transition: color 0.1s;
+  }
+  #edit-modal .star-input button.star.lit { color: var(--warn); }
+  #edit-modal .star-input button.star-clear {
+    font-size: 14px; color: var(--dim); margin-left: 6px;
+  }
+  #edit-modal .star-input button.star-clear:hover { color: var(--bad); }
+  /* History row: tiny star bar shown when shot has an enjoyment rating */
+  .row .stars {
+    display: inline-block; color: var(--warn);
+    font-variant-numeric: tabular-nums;
+    margin-right: 4px;
+  }
 
   /* ---------- mobile / tablet ---------- */
   @media (max-width: 900px) {
@@ -578,6 +614,7 @@
         <path class="compare-flow" fill="none" stroke="var(--fg-2)" stroke-width="1" stroke-linejoin="round" stroke-linecap="round" opacity="0.25" stroke-dasharray="2 3" d=""/>
         <path class="flow-curve" fill="none" stroke="var(--cream)" stroke-width="1.5" stroke-linejoin="round" stroke-linecap="round" opacity="0.55" d=""/>
         <path class="weight-curve" fill="none" stroke="var(--copper-bright)" stroke-width="2.2" stroke-linejoin="round" stroke-linecap="round" filter="url(#glow)" d=""/>
+        <g class="phase-labels"></g>
         <g class="axis-labels"></g>
         <line class="cursor" stroke="var(--fg-2)" stroke-width="1" stroke-dasharray="2 3" opacity="0" x1="0" x2="0" y1="0" y2="100%"/>
         <circle class="cursor-dot weight" r="4" fill="var(--copper-bright)" opacity="0" filter="url(#glow)"/>
@@ -587,6 +624,11 @@
         <div class="row"><span class="k">t</span><span class="v t" id="tt-t">—</span></div>
         <div class="row"><span class="k">weight</span><span class="v weight" id="tt-w">—</span></div>
         <div class="row"><span class="k">flow</span><span class="v flow" id="tt-f">—</span></div>
+        <div class="tt-compare" id="tt-compare" style="display:none">
+          <div class="row tt-divider"><span class="k">compare</span><span class="v"></span></div>
+          <div class="row"><span class="k">weight</span><span class="v weight" id="tt-cw">—</span></div>
+          <div class="row"><span class="k">flow</span><span class="v flow" id="tt-cf">—</span></div>
+        </div>
       </div>
     </div>
 
@@ -623,7 +665,18 @@
         <div class="field"><label for="ed-grinder-setting">Setting</label><input id="ed-grinder-setting" name="grinder_setting" placeholder="e.g. 412 μm"></div>
       </fieldset>
       <fieldset>
-        <legend>Notes</legend>
+        <legend>Tasting</legend>
+        <div class="field"><label for="ed-enjoyment">Enjoyment</label>
+          <div class="star-input" data-controller="stars">
+            <input type="hidden" id="ed-enjoyment" name="enjoyment" value="">
+            <button type="button" class="star" data-value="1">★</button>
+            <button type="button" class="star" data-value="2">★</button>
+            <button type="button" class="star" data-value="3">★</button>
+            <button type="button" class="star" data-value="4">★</button>
+            <button type="button" class="star" data-value="5">★</button>
+            <button type="button" class="star-clear" title="Clear rating">×</button>
+          </div>
+        </div>
         <div class="field" style="grid-template-columns: 1fr;"><textarea id="ed-notes" name="notes" placeholder="Tasting notes, adjustments, anything"></textarea></div>
       </fieldset>
       <div class="actions">
@@ -656,6 +709,9 @@ const ratioV = $('ratio-v');
 const ttT = $('tt-t');
 const ttW = $('tt-w');
 const ttF = $('tt-f');
+const ttCW = $('tt-cw');
+const ttCF = $('tt-cf');
+const ttCompare = $('tt-compare');
 const flowLabel = $('flow-label');
 const chartWrap = $('chart-wrap');
 
@@ -704,6 +760,36 @@ function tween() {
 }
 
 // ---------- chart ----------
+// SVG path helpers. polylinePath joins points with straight segments;
+// splinePath uses Catmull-Rom-derived cubic Beziers for visual smoothing
+// (matches what Highcharts' `type: spline` produces — same data, smoother
+// rendering between sample points).
+function polylinePath(pts) {
+  if (!pts.length) return '';
+  let d = `M${pts[0][0].toFixed(1)} ${pts[0][1].toFixed(1)}`;
+  for (let i = 1; i < pts.length; i++) {
+    d += ` L${pts[i][0].toFixed(1)} ${pts[i][1].toFixed(1)}`;
+  }
+  return d;
+}
+function splinePath(pts) {
+  if (pts.length < 2) return polylinePath(pts);
+  let d = `M${pts[0][0].toFixed(1)} ${pts[0][1].toFixed(1)}`;
+  for (let i = 0; i < pts.length - 1; i++) {
+    const p0 = pts[i - 1] || pts[i];
+    const p1 = pts[i];
+    const p2 = pts[i + 1];
+    const p3 = pts[i + 2] || p2;
+    // Catmull-Rom → cubic Bezier control points (tension = 0.5).
+    const c1x = p1[0] + (p2[0] - p0[0]) / 6;
+    const c1y = p1[1] + (p2[1] - p0[1]) / 6;
+    const c2x = p2[0] - (p3[0] - p1[0]) / 6;
+    const c2y = p2[1] - (p3[1] - p1[1]) / 6;
+    d += ` C${c1x.toFixed(1)} ${c1y.toFixed(1)} ${c2x.toFixed(1)} ${c2y.toFixed(1)} ${p2[0].toFixed(1)} ${p2[1].toFixed(1)}`;
+  }
+  return d;
+}
+
 class ShotChart {
   constructor(svg) {
     this.svg = svg;
@@ -742,6 +828,7 @@ class ShotChart {
     this.cursorDotW = svg.querySelector('.cursor-dot.weight');
     this.cursorDotF = svg.querySelector('.cursor-dot.flow');
     this.axisG = svg.querySelector('.axis-labels');
+    this.phaseG = svg.querySelector('.phase-labels');
 
     this.compareSamples = null;
 
@@ -770,15 +857,22 @@ class ShotChart {
 
   // Chart x-range: from pump_on (or up to 3s of prepend) to pump_off.
   // When pump_off isn't known yet (mid-shot live), fall back to a
-  // floor of fixedMaxT or the last sample, whichever is later.
+  // floor of fixedMaxT or the last sample, whichever is later. If a
+  // compare overlay is loaded and runs longer than the primary,
+  // extend so the compare tail stays on-canvas.
   xRange() {
     const PREPEND_VIEW_S = 3;
     const minT = Math.max(-PREPEND_VIEW_S, Math.min(0, this.samples[0]?.t ?? 0));
     const pumpOff = this.meta.pump_off_at_s;
     const lastDrop = this.meta.last_drop_at_s;
-    const maxT = pumpOff != null
+    let maxT = pumpOff != null
       ? Math.max(pumpOff, lastDrop ?? pumpOff)
       : Math.max(this.fixedMaxT, this.samples.at(-1)?.t ?? 0);
+    if (this.compareSamples?.length) {
+      const primaryT0 = this.firstDropT() ?? 0;
+      const compareMax = primaryT0 + (this.compareSamples.at(-1).t ?? 0);
+      if (compareMax > maxT) maxT = compareMax;
+    }
     return [minT, maxT];
   }
   xScale(t) {
@@ -925,25 +1019,26 @@ class ShotChart {
       this.pumpOffMark.setAttribute('opacity', 0);
       this.lastDropMark.setAttribute('opacity', 0);
       this.acaiaStopMark.setAttribute('opacity', 0);
+      if (this.phaseG) while (this.phaseG.firstChild) this.phaseG.removeChild(this.phaseG.firstChild);
       return;
     }
 
-    // weight curve
-    const t0 = this.firstDropT() ?? 0;
-    let dW = '', dF = '';
-    this.samples.forEach((s, i) => {
-      const x = this.xScale(s.t);
-      const yw = this.yScaleW(s.w);
-      const yf = this.yScaleF(s.f ?? 0);
-      dW += (i === 0 ? 'M' : 'L') + x.toFixed(1) + ' ' + yw.toFixed(1) + ' ';
-      dF += (i === 0 ? 'M' : 'L') + x.toFixed(1) + ' ' + yf.toFixed(1) + ' ';
+    // Build polyline + spline paths in one pass over the samples.
+    // Spline (Catmull-Rom → cubic Bezier) is used for flow because the
+    // BLE-derived signal is jagged and benefits from visual smoothing;
+    // weight is monotonic so straight segments render cleanly.
+    const ptsW = [], ptsF = [];
+    this.samples.forEach((s) => {
+      ptsW.push([this.xScale(s.t), this.yScaleW(s.w)]);
+      ptsF.push([this.xScale(s.t), this.yScaleF(s.f ?? 0)]);
     });
+    const dW = polylinePath(ptsW);
     this.weightCurve.setAttribute('d', dW);
-    this.flowCurve.setAttribute('d', dF);
+    this.flowCurve.setAttribute('d', splinePath(ptsF));
 
     // weight fill (close to baseline)
-    const xLeft = this.xScale(this.samples[0].t);
-    const xRight = this.xScale(this.samples.at(-1).t);
+    const xLeft = ptsW[0][0];
+    const xRight = ptsW.at(-1)[0];
     const yBase = this.H - this.pad.b;
     this.weightFill.setAttribute('d', `M${xLeft} ${yBase} ` + dW.slice(1) + `L${xRight} ${yBase} Z`);
 
@@ -996,6 +1091,33 @@ class ShotChart {
     setVerticalLine(this.lastDropMark, tLastDrop);
     // Manual Acaia button-press (rare; auto-stop doesn't broadcast).
     setVerticalLine(this.acaiaStopMark, this.meta.acaia_stop_at_s ?? null);
+    this._renderPhaseLabels({
+      'pump-on': tPumpOn,
+      'first-drop': tFirstDrop,
+      'pump-off': tPumpOff,
+      'last-drop': tLastDrop,
+    });
+  }
+
+  _renderPhaseLabels(events) {
+    if (!this.phaseG) return;
+    while (this.phaseG.firstChild) this.phaseG.removeChild(this.phaseG.firstChild);
+    const SVGNS = 'http://www.w3.org/2000/svg';
+    // Stagger labels at two heights so adjacent markers (e.g. pump-on
+    // and first-drop with short dwells) don't overlap horizontally.
+    const yA = this.pad.t + 12;
+    const yB = this.pad.t + 26;
+    let alt = false;
+    for (const [cls, t] of Object.entries(events)) {
+      if (t == null) continue;
+      const text = document.createElementNS(SVGNS, 'text');
+      text.setAttribute('class', cls);
+      text.setAttribute('x', this.xScale(t) + 4);
+      text.setAttribute('y', alt ? yB : yA);
+      text.textContent = cls.replace('-', ' ');
+      this.phaseG.appendChild(text);
+      alt = !alt;
+    }
   }
 
   _renderCompare() {
@@ -1006,15 +1128,14 @@ class ShotChart {
     }
     // Anchor compare so its first-drop aligns with primary's first-drop.
     const primaryT0 = this.firstDropT() ?? 0;
-    let dW = '', dF = '';
-    this.compareSamples.forEach((s, i) => {
-      const t = s.t + primaryT0;
-      const x = this.xScale(t);
-      dW += (i === 0 ? 'M' : 'L') + x.toFixed(1) + ' ' + this.yScaleW(s.w).toFixed(1) + ' ';
-      dF += (i === 0 ? 'M' : 'L') + x.toFixed(1) + ' ' + this.yScaleF(s.f ?? 0).toFixed(1) + ' ';
-    });
-    this.compareWeight.setAttribute('d', dW);
-    this.compareFlow.setAttribute('d', dF);
+    const ptsW = [], ptsF = [];
+    for (const s of this.compareSamples) {
+      const x = this.xScale(s.t + primaryT0);
+      ptsW.push([x, this.yScaleW(s.w)]);
+      ptsF.push([x, this.yScaleF(s.f ?? 0)]);
+    }
+    this.compareWeight.setAttribute('d', polylinePath(ptsW));
+    this.compareFlow.setAttribute('d', splinePath(ptsF));
   }
 
   _renderAxes() {
@@ -1094,6 +1215,24 @@ class ShotChart {
     ttT.textContent = Math.max(0, dataX).toFixed(1) + ' s';
     ttW.textContent = (nearest.w ?? 0).toFixed(1) + ' g';
     ttF.textContent = (nearest.f ?? 0).toFixed(2) + ' g/s';
+
+    // Compare values: find the compare sample at the same time-relative-
+    // to-first-drop as the cursor, so the readout describes the same
+    // shot moment in both traces.
+    if (this.compareSamples?.length) {
+      const primaryT0 = this.firstDropT() ?? 0;
+      const targetT = dataX - primaryT0;
+      let cn = this.compareSamples[0], cBest = Infinity;
+      for (const s of this.compareSamples) {
+        const d = Math.abs(s.t - targetT);
+        if (d < cBest) { cBest = d; cn = s; }
+      }
+      ttCW.textContent = (cn.w ?? 0).toFixed(1) + ' g';
+      ttCF.textContent = (cn.f ?? 0).toFixed(2) + ' g/s';
+      ttCompare.style.display = '';
+    } else {
+      ttCompare.style.display = 'none';
+    }
     tooltip.classList.add('visible');
     const tw = tooltip.offsetWidth || 160;
     const wrapR = chartWrap.getBoundingClientRect();
@@ -1346,10 +1485,31 @@ function formatWhen(iso) {
   return whenFmt.format(d).replace(/,([^,]*)$/, ' ·$1');
 }
 
+// A "coffee bag" is identified by (bean_brand, bean_type, roast_date) —
+// any shots sharing all three came from the same bag of beans. Returns
+// a key string, or null when the shot doesn't have enough metadata.
+function bagKey(meta) {
+  if (!meta) return null;
+  const parts = [meta.bean_brand, meta.bean_type, meta.roast_date]
+    .map(p => p ? String(p).trim().toLowerCase() : '');
+  return parts.every(Boolean) ? parts.join('|') : null;
+}
+
 function renderHistory(items) {
   if (!items.length) {
     historyList.innerHTML = `<div id="history-empty">No shots saved yet</div>`;
     return;
+  }
+  // Tally shots per bag so we can show "shot N of M" on each row.
+  const bagCounts = {};
+  const bagSequence = {};
+  // items arrive newest-first; reverse-iterate so the oldest shot from
+  // a bag gets index 1.
+  for (let i = items.length - 1; i >= 0; i--) {
+    const k = bagKey(items[i].metadata);
+    if (!k) continue;
+    bagCounts[k] = (bagCounts[k] || 0) + 1;
+    bagSequence[items[i].file] = bagCounts[k];
   }
   historyList.innerHTML = items.map(it => {
     const when = formatWhen(it.saved_at) || it.file;
@@ -1377,9 +1537,17 @@ function renderHistory(items) {
     }
     if (it.metadata?.grinder_setting) meta2parts.push(`<span class="grind">${escapeHtml(it.metadata.grinder_setting)}</span>`);
     if (it.days_off_roast != null) meta2parts.push(`<span class="roast">${it.days_off_roast}d off roast</span>`);
+    const bk = bagKey(it.metadata);
+    if (bk && bagCounts[bk] > 1) {
+      meta2parts.push(`<span class="bag">shot ${bagSequence[it.file]} of ${bagCounts[bk]}</span>`);
+    }
     const metaLine = meta2parts.length ? `<div class="meta-line">${meta2parts.join(' · ')}</div>` : '';
+    const enjoyment = parseInt(it.metadata?.enjoyment, 10);
+    const stars = (Number.isFinite(enjoyment) && enjoyment > 0)
+      ? `<span class="stars" title="Rated ${enjoyment}/5">${'★'.repeat(enjoyment)}${'☆'.repeat(5 - enjoyment)}</span>`
+      : '';
     return `<div class="row${sel}${isCompare ? ' compare' : ''}" data-file="${it.file}">
-      <div class="when">${when}</div>
+      <div class="when">${when}${stars}</div>
       <div class="top"><div class="weight-val">${wt}</div><div class="duration">${dur}</div></div>
       <div class="meta">${meta}</div>
       ${metaLine}
@@ -1548,6 +1716,26 @@ function saveSticky(values) {
   localStorage.setItem(STICKY_KEY, JSON.stringify(sticky));
 }
 
+// Star rating: 5 buttons + a clear button drive a hidden input.
+const enjoymentInput = $('ed-enjoyment');
+const starButtons = Array.from(document.querySelectorAll('#edit-modal .star-input .star'));
+function setStarRating(value) {
+  const n = parseInt(value, 10);
+  enjoymentInput.value = Number.isFinite(n) && n >= 1 && n <= 5 ? String(n) : '';
+  starButtons.forEach((b, i) => b.classList.toggle('lit', i < n));
+}
+starButtons.forEach((b) => {
+  b.addEventListener('click', () => setStarRating(b.dataset.value));
+  b.addEventListener('mouseenter', () => {
+    const v = parseInt(b.dataset.value, 10);
+    starButtons.forEach((s, i) => s.classList.toggle('lit', i < v));
+  });
+});
+const starInput = document.querySelector('#edit-modal .star-input');
+starInput?.addEventListener('mouseleave', () => setStarRating(enjoymentInput.value));
+document.querySelector('#edit-modal .star-clear')
+  ?.addEventListener('click', () => setStarRating(''));
+
 async function openEdit(file) {
   try {
     const r = await fetch(`/shots/${encodeURIComponent(file)}`, { cache: 'no-store' });
@@ -1569,6 +1757,7 @@ async function openEdit(file) {
     fill('ed-grinder-model', 'grinder_model');
     fill('ed-grinder-setting', 'grinder_setting');
     fill('ed-notes', 'notes');
+    setStarRating(existing.enjoyment ?? '');
     editShotWhen.textContent = formatWhen(parseSavedAt(file)) || file;
     editOverlay.classList.add('visible');
     $('ed-bean-weight').focus();
@@ -1600,6 +1789,9 @@ editForm.addEventListener('submit', (e) => {
     if (k === 'bean_weight_g') {
       const n = parseFloat(trimmed);
       if (Number.isFinite(n)) metadata[k] = n;
+    } else if (k === 'enjoyment') {
+      const n = parseInt(trimmed, 10);
+      if (Number.isFinite(n) && n >= 1 && n <= 5) metadata[k] = n;
     } else {
       metadata[k] = trimmed;
     }
