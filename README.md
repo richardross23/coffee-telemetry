@@ -5,6 +5,8 @@ Bluetooth scale + accelerometer-instrumented machine and renders it on a
 live dashboard. Three containers, one MQTT topic tree, one self-contained
 JSON file per shot.
 
+![Dashboard with a live shot in progress and the history sidebar docked on the right](docs/dashboard.png)
+
 ## What it is
 
 ```
