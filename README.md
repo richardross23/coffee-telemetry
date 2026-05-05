@@ -139,6 +139,21 @@ docker compose down                   # stop everything (data persists)
 - **`coffee/water/pct` and `coffee/device/state` are retained** by the
   broker, so the tank widget and offline badge populate immediately.
 
+## What this isn't
+
+A product. It's a personal tool that runs on one Mac mini next to one
+Synchronika and talks to one Acaia Lunar. Heavily AI-assisted (most of
+the boilerplate, much of the dashboard), reviewed and shaped by hand.
+Single-user, LAN-only, no auth, no tests beyond the smoke check above.
+
+If it suits your setup, take it. If not, the firmware contracts
+(`coffee/shot/{start,sample,end,raw}`) are documented enough to
+reimplement the home-server side however you like.
+
+PRs and issues are welcome — happy to take constructive contributions,
+especially around the firmware/dashboard contract or things that
+generalise beyond my one rig. Less interested in style debates.
+
 ## License
 
 MIT — see [`LICENSE`](LICENSE).
