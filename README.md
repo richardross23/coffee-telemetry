@@ -5,8 +5,6 @@ Bluetooth scale + accelerometer-instrumented machine and renders it on a
 live dashboard. Three containers, one MQTT topic tree, one self-contained
 JSON file per shot.
 
-![dashboard screenshot — placeholder, replace with a real one before publishing]()
-
 ## What it is
 
 ```
@@ -59,7 +57,7 @@ Requires Docker (any flavour — Docker Desktop, OrbStack, Linux Docker,
 Podman with compose, etc).
 
 ```sh
-git clone https://github.com/<your-fork>/coffee-telemetry
+git clone https://github.com/richardross23/coffee-telemetry
 cd coffee-telemetry
 docker compose up -d
 ```

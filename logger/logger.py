@@ -1,15 +1,11 @@
-"""MQTT subscriber that writes one self-contained JSON file per espresso shot
-and maintains an index for the dashboard's history view.
+"""MQTT subscriber: writes one JSON file per shot and maintains a history index.
 
-Subscribes to coffee/shot/{start,sample,end} for the shot itself, plus
-coffee/scale/weight for a rolling pre-shot buffer that gets prepended to
-each saved file (so replay shows the same scale lead-in the live dashboard
-shows). Also handles coffee/shot/metadata/set and coffee/shot/delete edits.
-
-Reassembles coffee/shot/raw chunks into shots/_raw_archive/<id>.json as
-belt-and-braces backup of the device's own canonical raw archive. Never
-read by the dashboard; safe to delete the directory once device-side
-retrieval is trusted.
+Live path:  coffee/shot/{start,sample,end} → shots/<wallclock>_<id>.json
+            (with a 10s rolling pre-shot weight buffer prepended).
+Raw path:   coffee/shot/raw chunks → reassemble → shots/<id>.json on the
+            coffee/shot/raw/complete marker, then ack on coffee/shot/ack/<id>.
+Edits:      coffee/shot/metadata/set merges whitelisted fields into a saved
+            shot; coffee/shot/delete removes one.
 """
 
 import datetime
@@ -35,6 +31,7 @@ T_START = "coffee/shot/start"
 T_SAMPLE = "coffee/shot/sample"
 T_END = "coffee/shot/end"
 T_RAW = "coffee/shot/raw"
+T_RAW_COMPLETE = "coffee/shot/raw/complete"
 T_SCALE_W = "coffee/scale/weight"
 T_META_SET = "coffee/shot/metadata/set"
 T_DELETE = "coffee/shot/delete"
@@ -61,13 +58,8 @@ FILENAME_TS_RE = re.compile(r"^(\d{8}T\d{6}Z)_")
 
 SCALE_BUFFER_SEC = 30.0
 PREPEND_LOOKBACK_SEC = 10.0
-# Anything heavier than this in the prepend window is the user placing
-# a cup, not a real first drop — drop it so it doesn't pollute the curve.
-PREPEND_MAX_WEIGHT_G = 5.0
-
-# Tare-event filter: the firmware can fire shot/start on weight delta
-# during a tare, producing zero-weight "shots". Drop them at save time.
-MIN_FINAL_WEIGHT_G = 2.0
+PREPEND_MAX_WEIGHT_G = 5.0   # heavier samples in this window are cup-placements
+MIN_FINAL_WEIGHT_G = 2.0     # below this, the "shot" is almost certainly a tare event
 WEIGHT_RANGE_G = (-5.0, 200.0)
 
 
@@ -85,12 +77,10 @@ def parse_ts(filename: str) -> str:
 
 
 def looks_like_tare(record: dict) -> tuple[bool, str]:
-    """True if this record looks like a tare event masquerading as a shot.
+    """Detect tare events masquerading as shots.
 
-    shot/end's final_weight_g is a snapshot — if the user lifted the cup
-    or BLE went stale, it can read zero on a real shot. We use the max
-    sample weight (the same stream the dashboard rendered live) as ground
-    truth.
+    Uses max sample weight rather than shot/end's final_weight_g — that
+    snapshot reads zero if the cup was lifted before publish.
     """
     samples = record.get("samples") or []
     if not samples:
@@ -152,8 +142,7 @@ def build_index_entry(name: str, data: dict) -> dict:
     first_t = first_drop_t_ms(samples)
     last_t = samples[-1].get("t_ms") if samples else None
 
-    # Pour time prefers Acaia's auto-stop event over our last-sample fallback;
-    # Acaia knows the difference between a finished shot and dribbles.
+    # Acaia's auto-stop is the cleanest pour-end signal; fall back to last sample.
     acaia_stop_s = data.get("acaia_stop_at_s")
     if acaia_stop_s is not None and first_t is not None:
         pour_time_s = acaia_stop_s - first_t / 1000.0
@@ -163,12 +152,6 @@ def build_index_entry(name: str, data: dict) -> dict:
         pour_time_s = None
 
     pump_off_s = data.get("pump_off_at_s")
-    last_drop_s = data.get("last_drop_at_s")
-    after_drip_s = (
-        max(0.0, last_drop_s - pump_off_s)
-        if pump_off_s is not None and last_drop_s is not None
-        else None
-    )
 
     saved_at = parse_ts(name)
     meta = data.get("metadata") or {}
@@ -179,9 +162,8 @@ def build_index_entry(name: str, data: dict) -> dict:
         "duration_s": data.get("duration_s"),
         "pour_time_s": pour_time_s,
         "pump_off_at_s": pump_off_s,
-        "last_drop_at_s": last_drop_s,
+        "last_drop_at_s": data.get("last_drop_at_s"),
         "pump_time_s": pump_off_s,
-        "after_drip_s": after_drip_s,
         "dwell_s": data.get("dwell_s"),
         "acaia_start_at_s": data.get("acaia_start_at_s"),
         "acaia_stop_at_s": data.get("acaia_stop_at_s"),
@@ -196,10 +178,7 @@ def build_index_entry(name: str, data: dict) -> dict:
     return entry
 
 
-# --- Index cache --------------------------------------------------------------
-# Kept in memory to avoid re-scanning every shot file from disk on every
-# message. Updated incrementally on save / metadata-edit / delete.
-
+# --- Index cache: in-memory mirror of shots/index.json -----------------------
 _index: dict[str, dict] = {}
 
 
@@ -213,9 +192,8 @@ def _read_shot(path: str) -> dict | None:
 
 
 def index_scan() -> None:
-    """One-time disk scan at startup. Only timestamped files (the
-    coffee/shot/end summaries) are indexed for history; raw archives
-    saved as bare <shot_id>.json by the ack handshake are skipped."""
+    """Populate _index from disk. Bare <shot_id>.json files (raw archives)
+    aren't shown in history — only timestamped summary files are."""
     _index.clear()
     for path in glob.glob(os.path.join(OUT, "*.json")):
         name = os.path.basename(path)
@@ -283,7 +261,7 @@ def on_connect(client, userdata, flags, rc, properties=None):
     log.info("connected to %s:%s", BROKER, PORT)
     client.subscribe([
         (T_START, 0), (T_SAMPLE, 0), (T_END, 0),
-        (T_RAW, 0), (T_RAW_COMPLETE, 1),  # complete is QoS 1: ack handshake
+        (T_RAW, 0), (T_RAW_COMPLETE, 1),  # QoS 1 — ack handshake
         (T_SCALE_W, 0), (T_META_SET, 0), (T_DELETE, 0),
     ])
 
@@ -377,20 +355,7 @@ _MS_FIELDS = (
 )
 
 
-# --- Raw-capture archive (ack-handshaked) ------------------------------------
-# Firmware publishes per-shot raw data in two phases:
-#   1. coffee/shot/raw (QoS 0): chunks `<shot_id>|<idx>|<total>|<bytes>`,
-#      ~3.5 KB each, concatenated payload is the full JSON trace.
-#   2. coffee/shot/raw/complete (QoS 1): {"shot_id", "chunks", "bytes"}
-#      — the signal that the device has finished sending. Only on
-#      receipt of this marker do we validate, persist, and ack.
-#
-# We publish coffee/shot/ack/<shot_id> (QoS 1) AFTER a successful disk
-# write. The device retains its local copy until acked and replays the
-# whole shot on reconnect if anything went wrong, so partial state
-# here is never persisted.
-
-T_RAW_COMPLETE = "coffee/shot/raw/complete"
+# Reassemble raw shot chunks; persist on the complete marker; ack after disk.
 RAW_TTL_SEC = 120.0
 _raw_chunks: dict[str, dict] = {}    # shot_id -> {chunks: {idx: bytes}, ts: float}
 
@@ -409,6 +374,7 @@ def handle_raw_chunk(payload: bytes) -> None:
 
     bucket = _raw_chunks.setdefault(shot_id, {"chunks": {}, "ts": time.time()})
     bucket["chunks"][idx] = parts[3]
+    bucket["ts"] = time.time()  # refresh on every chunk so long shots don't get evicted mid-stream
     _evict_stale_raw()
 
 
@@ -477,11 +443,14 @@ def handle_shot_end(shot_id: str, payload: dict) -> None:
         )
         return
 
-    buf = shots_in_flight.pop(shot_id, None) or {"start": None, "samples": [], "prepend": []}
+    buf = shots_in_flight.pop(shot_id, None)
     record = dict(payload)
-    record.setdefault("samples", buf["prepend"] + buf["samples"])
-    if buf["start"] and "tank_pct_at_start" not in record:
-        record["tank_pct_at_start"] = buf["start"].get("tank_pct_at_start")
+    if buf is not None:
+        record.setdefault("samples", buf["prepend"] + buf["samples"])
+        if buf["start"] and "tank_pct_at_start" not in record:
+            record["tank_pct_at_start"] = buf["start"].get("tank_pct_at_start")
+    else:
+        record.setdefault("samples", [])
 
     dwell_ms = payload.get("dwell_ms")
     if dwell_ms:

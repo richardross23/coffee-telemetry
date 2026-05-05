@@ -685,7 +685,7 @@
       <fieldset>
         <legend>Tasting</legend>
         <div class="field"><label for="ed-enjoyment">Enjoyment</label>
-          <div class="star-input" data-controller="stars">
+          <div class="star-input">
             <input type="hidden" id="ed-enjoyment" name="enjoyment" value="">
             <button type="button" class="star" data-value="1">★</button>
             <button type="button" class="star" data-value="2">★</button>
@@ -736,7 +736,7 @@ const chartWrap = $('chart-wrap');
 let mode = 'live';
 let activeShotId = null;
 let selectedFile = null;
-let liveDwellSec = null;  // captured from coffee/shot/start; rendered on shot/end
+let liveDwellSec = null;  // populated from shot/end's dwell_ms; passed to chart meta
 
 // Rolling buffer of always-on weight samples (Acaia stream).
 // Used to prepend the chart at shot/start so we see the *real* first drops
@@ -778,10 +778,9 @@ function tween() {
 }
 
 // ---------- chart ----------
-// SVG path helpers. polylinePath joins points with straight segments;
-// splinePath uses Catmull-Rom-derived cubic Beziers for visual smoothing
-// (matches what Highcharts' `type: spline` produces — same data, smoother
-// rendering between sample points).
+// SVG path builders. polylinePath = straight segments. splinePath =
+// Catmull-Rom-derived cubic Beziers, control points clamped to segment
+// y-range to prevent overshoot.
 function polylinePath(pts) {
   if (!pts.length) return '';
   let d = `M${pts[0][0].toFixed(1)} ${pts[0][1].toFixed(1)}`;
@@ -798,13 +797,10 @@ function splinePath(pts) {
     const p1 = pts[i];
     const p2 = pts[i + 1];
     const p3 = pts[i + 2] || p2;
-    // Catmull-Rom → cubic Bezier control points (tension = 0.5).
     const c1x = p1[0] + (p2[0] - p0[0]) / 6;
     let   c1y = p1[1] + (p2[1] - p0[1]) / 6;
     const c2x = p2[0] - (p3[0] - p1[0]) / 6;
     let   c2y = p2[1] - (p3[1] - p1[1]) / 6;
-    // Clamp control y-coords to the segment's own range to prevent
-    // visual overshoot when neighbouring points have steep slopes.
     const yMin = Math.min(p1[1], p2[1]);
     const yMax = Math.max(p1[1], p2[1]);
     if (c1y < yMin) c1y = yMin; else if (c1y > yMax) c1y = yMax;
@@ -835,7 +831,6 @@ class ShotChart {
     this._maxW = this.fixedMaxW;
     this._maxF = this.fixedMaxF;
 
-    this.bg = svg.querySelector('.grid-bg');
     this.preBand = svg.querySelector('.preinfusion-band');
     this.extractBand = svg.querySelector('.extraction-band');
     this.firstDrop = svg.querySelector('.first-drop');
@@ -941,16 +936,15 @@ class ShotChart {
   setMeta(meta) { Object.assign(this.meta, meta); this.render(); }
   reset() { this.samples = []; this.meta = {}; this.flowSmoothed = 0; this._lastGapIdx = 0; this.compareSamples = null; this.render(); }
 
-  // Set/clear a second shot for overlay compare. Samples are normalised
-  // so the compare curve's first-drop aligns with the primary's first-drop.
+  // Overlay a second shot. Samples are re-timed so the compare's
+  // first-drop aligns with the primary's; flow is derived with the
+  // same windowed-EMA + jitter handling as the primary trace.
   setCompare(samples) {
     if (!samples || !samples.length) {
       this.compareSamples = null;
       this.render();
       return;
     }
-    // Compute compare's own first-drop, derive flow, then re-time relative
-    // to it so the curves overlay sensibly even if pour times differ.
     const filtered = samples.filter(s => Number.isFinite(s.t) && Number.isFinite(s.w));
     let consec = 0, t0 = filtered[0]?.t ?? 0;
     for (let i = 0; i < filtered.length; i++) {
@@ -958,41 +952,40 @@ class ShotChart {
         if (++consec >= 2) { t0 = filtered[i - 1].t; break; }
       } else { consec = 0; }
     }
-    let smoothed = 0;
+    let smoothed = 0, floor = 0;
     const out = filtered.map((s, i, arr) => {
+      if (i > 0) {
+        const gap = s.t - arr[i - 1].t;
+        if (gap > 0.4 || gap < 0.05) {
+          floor = i;
+          return { t: s.t - t0, w: s.w, f: smoothed };
+        }
+      }
       const tStart = s.t - this.flowWindowS;
       let j = i;
-      while (j > 0 && arr[j - 1].t >= tStart) j--;
+      while (j > floor && arr[j - 1].t >= tStart) j--;
       const dT = s.t - arr[j].t;
       const dW = s.w - arr[j].w;
-      const raw = dT > 0 ? Math.max(0, dW / dT) : 0;
-      smoothed = this.flowEma * raw + (1 - this.flowEma) * smoothed;
+      const raw = dT > 0 ? dW / dT : 0;
+      if (raw <= this.flowMaxG) {
+        smoothed = this.flowEma * Math.max(0, raw) + (1 - this.flowEma) * smoothed;
+      }
       return { t: s.t - t0, w: s.w, f: smoothed };
     });
     this.compareSamples = out;
     this.render();
   }
 
-  // Sliding-window derivative + EMA smoothing. Mutates samples[i].f.
-  // Negative gusts clamp to 0; anything above flowMaxG is rejected
-  // (EMA holds previous value through the glitch).
-  //
-  // BLE jitter handling: Acaia occasionally pauses transmission for
-  // a few hundred ms then dumps queued samples in a sub-50ms burst.
-  // Without special-casing, the post-gap sample sees a 1s window
-  // spanning the gap and reports an inflated rate; we reset on >400ms
-  // gaps and pin the window's lookback to the most recent gap so the
-  // next few samples don't keep inheriting the pre-gap baseline.
+  // Per-sample windowed dW/dT, EMA-smoothed. Outliers (raw > flowMaxG)
+  // and BLE jitter — Acaia sometimes stalls then dumps a queued burst —
+  // both hold the EMA at its previous value rather than spike. The
+  // window scan can't reach back across a logged gap/burst, so the
+  // first post-disturbance samples don't inherit a polluted baseline.
   _deriveFlowAt(i) {
     const s = this.samples[i];
     const prev = i > 0 ? this.samples[i - 1] : null;
     if (prev) {
       const gap = s.t - prev.t;
-      // BLE jitter handling. Big gaps and bursts both pin the window
-      // floor here so the next normal sample's window doesn't reach
-      // back across the disturbance. The flow value holds at the
-      // previous EMA — visually continuous, but the gap effectively
-      // doesn't contribute to the rate calc.
       if (gap > 0.4 || gap < 0.05) {
         this._lastGapIdx = i;
         s.f = this.flowSmoothed;
@@ -1000,7 +993,7 @@ class ShotChart {
       }
     }
     const tStart = s.t - this.flowWindowS;
-    const floor = this._lastGapIdx ?? 0;
+    const floor = this._lastGapIdx;
     let j = i;
     while (j > floor && this.samples[j - 1].t >= tStart) j--;
     const dT = s.t - this.samples[j].t;
@@ -1067,10 +1060,7 @@ class ShotChart {
       return;
     }
 
-    // Build polyline + spline paths in one pass over the samples.
-    // Spline (Catmull-Rom → cubic Bezier) is used for flow because the
-    // BLE-derived signal is jagged and benefits from visual smoothing;
-    // weight is monotonic so straight segments render cleanly.
+    // Weight is monotonic → straight segments. Flow is jagged → spline.
     const ptsW = [], ptsF = [];
     this.samples.forEach((s) => {
       ptsW.push([this.xScale(s.t), this.yScaleW(s.w)]);
@@ -1390,7 +1380,6 @@ function setShotInfo(meta, savedAtIso) {
   }
   el.innerHTML = groups.join('');
 }
-function clearShotInfo() { $('shotinfo').innerHTML = ''; }
 
 // ---------- MQTT ----------
 const wsProto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
@@ -1683,18 +1672,14 @@ async function exportDecent(file) {
       flow.push(+smoothed.toFixed(3));
     }
 
-    // Visualizer.coffee's DecentJson parser (miharekar/visualizer) reads
-    // a nested schema: elapsed at top level, then flow/pressure/
-    // temperature/totals as objects keyed by sub-trace. Values are
-    // string-formatted floats. Settings live under app.data.settings
-    // and are extracted by EXTRA_DATA_CAPTURE.
-    const fixed2 = (v) => (+v).toFixed(2);
-    const fixed3 = (v) => (+v).toFixed(3);
-    const elapsed = samples.map(s => fixed3(s.t - t0));
-    const weight = samples.map(s => fixed2(s.w));
-    const flowStr = flow.map(fixed3);
-    const n = elapsed.length;
-    const zeros = new Array(n).fill('0.0');
+    // miharekar/visualizer's DecentJson parser expects nested
+    // flow/pressure/temperature/totals objects with string-formatted
+    // floats, and settings under app.data.settings. Pressure/temperature
+    // are required-shape but we don't measure them, so zero-fill.
+    const elapsed = samples.map(s => (s.t - t0).toFixed(3));
+    const weight = samples.map(s => s.w.toFixed(2));
+    const flowStr = flow.map(v => v.toFixed(3));
+    const zeros = new Array(elapsed.length).fill('0.0');
     const clock = Math.floor(Date.parse(shot.saved_at || new Date().toISOString()) / 1000)
                   || Math.floor(Date.now() / 1000);
     const meta = shot.metadata || {};
@@ -1716,8 +1701,9 @@ async function exportDecent(file) {
       clock,
       timestamp: clock,
       elapsed,
-      flow: { flow: flowStr, by_weight: flowStr, by_weight_raw: flowStr, goal: zeros },
-      pressure: { pressure: zeros, goal: zeros },
+      // Our flow is scale-derived → goes under by_weight, not flow.
+      flow: { by_weight: flowStr },
+      pressure: { pressure: zeros },
       temperature: { basket: zeros, mix: zeros, goal: zeros },
       totals: { weight, water_dispensed: zeros },
       state_change: zeros,
@@ -1775,10 +1761,10 @@ starButtons.forEach((b) => {
     starButtons.forEach((s, i) => s.classList.toggle('lit', i < v));
   });
 });
-const starInput = document.querySelector('#edit-modal .star-input');
-starInput?.addEventListener('mouseleave', () => setStarRating(enjoymentInput.value));
+document.querySelector('#edit-modal .star-input')
+  .addEventListener('mouseleave', () => setStarRating(enjoymentInput.value));
 document.querySelector('#edit-modal .star-clear')
-  ?.addEventListener('click', () => setStarRating(''));
+  .addEventListener('click', () => setStarRating(''));
 
 async function openEdit(file) {
   try {
