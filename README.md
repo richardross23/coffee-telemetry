@@ -87,8 +87,8 @@ mqtt:
   client_id: coffee-tank
 ```
 
-Re-flash. Full firmware patch:
-[`docs/mqtt-firmware-patch.md`](https://github.com/richardross23/water-meter/blob/main/docs/mqtt-firmware-patch.md).
+Re-flash. The full firmware lives in the
+[water-meter repo](https://github.com/richardross23/water-meter).
 
 ## Smoke test (no firmware needed)
 
