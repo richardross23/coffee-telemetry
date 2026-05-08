@@ -89,11 +89,18 @@ def looks_like_tare(record: dict) -> tuple[bool, str]:
     sample_max = max(weights) if weights else 0
     if sample_max < MIN_FINAL_WEIGHT_G:
         return True, f"max sample {sample_max:.2f}g < {MIN_FINAL_WEIGHT_G}g"
-    lo, hi = WEIGHT_RANGE_G
-    for w in weights:
-        if w < lo or w > hi:
-            return True, f"weight {w:.1f}g outside [{lo}, {hi}]g"
     return False, ""
+
+
+def clip_outlier_samples(samples: list[dict]) -> list[dict]:
+    """Drop samples outside WEIGHT_RANGE_G — Acaia reads a large negative
+    when a cup is lifted off the scale post-tare, which is real (cup
+    weight) but not extraction data."""
+    lo, hi = WEIGHT_RANGE_G
+    return [
+        s for s in samples
+        if s.get("weight_g") is None or lo <= s["weight_g"] <= hi
+    ]
 
 
 def first_drop_t_ms(samples: list[dict], threshold: float = 0.1) -> int | None:
@@ -467,6 +474,15 @@ def handle_shot_end(shot_id: str, payload: dict) -> None:
     if is_tare:
         log.info("dropped shot %s: %s", shot_id, reason)
         return
+
+    # Drop cup-lift / out-of-range samples without rejecting the whole
+    # shot — Acaia reads a large negative when the cup leaves the
+    # scale post-tare, but the extraction data before that is real.
+    n_before = len(record["samples"])
+    record["samples"] = clip_outlier_samples(record["samples"])
+    n_clipped = n_before - len(record["samples"])
+    if n_clipped:
+        log.info("shot %s: clipped %d out-of-range sample(s)", shot_id, n_clipped)
 
     # Reconcile final_weight_g against samples — shot/end's snapshot can
     # read low if the cup left the scale right before the publish.
