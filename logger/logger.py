@@ -103,6 +103,54 @@ def clip_outlier_samples(samples: list[dict]) -> list[dict]:
     ]
 
 
+def channeling_count(samples: list[dict], first_drop_ms: int,
+                       pump_off_s: float) -> int | None:
+    """Count flow excursions ≥30% above the local 3s rolling mean during
+    extraction (first drop +2s through pump_off). Two or more = likely
+    channeling. Mirrors the dashboard's chart.channelingScore() algorithm."""
+    if first_drop_ms is None or pump_off_s is None:
+        return None
+    fd_s = first_drop_ms / 1000.0
+    # Re-derive flow with the same windowed-EMA + jitter handling
+    # the dashboard uses, so the score matches what's rendered.
+    pts = [(s["t_ms"] / 1000.0, s["weight_g"]) for s in samples
+           if s.get("t_ms") is not None and s.get("weight_g") is not None]
+    if len(pts) < 10:
+        return None
+    flow, smoothed, last_gap = [0.0] * len(pts), 0.0, 0
+    for i, (t, w) in enumerate(pts):
+        if i > 0:
+            gap = t - pts[i - 1][0]
+            if gap > 0.4 or gap < 0.05:
+                last_gap = i
+                flow[i] = smoothed
+                continue
+        t_start = t - 1.0
+        j = i
+        while j > last_gap and pts[j - 1][0] >= t_start:
+            j -= 1
+        dT, dW = t - pts[j][0], w - pts[j][1]
+        raw = dW / dT if dT > 0 else 0.0
+        if raw <= 8.0:
+            smoothed = 0.4 * max(0.0, raw) + 0.6 * smoothed
+        flow[i] = smoothed
+
+    ext = [(pts[i][0], flow[i]) for i in range(len(pts))
+           if fd_s + 2.0 <= pts[i][0] <= pump_off_s]
+    if len(ext) < 8:
+        return None
+    mean_flow = sum(f for _, f in ext) / len(ext)
+    if mean_flow <= 0.3:
+        return None
+    count = 0
+    for t, f in ext:
+        window = [fj for tj, fj in ext if abs(tj - t) <= 1.5]
+        trend = sum(window) / len(window) if window else mean_flow
+        if f - trend > 0.3 * mean_flow:
+            count += 1
+    return count
+
+
 def first_drop_t_ms(samples: list[dict], threshold: float = 0.1) -> int | None:
     """First t_ms where weight crosses threshold for two consecutive samples."""
     consecutive = 0
@@ -159,6 +207,7 @@ def build_index_entry(name: str, data: dict) -> dict:
         pour_time_s = None
 
     pump_off_s = data.get("pump_off_at_s")
+    channeling = channeling_count(samples, first_t, pump_off_s)
 
     saved_at = parse_ts(name)
     meta = data.get("metadata") or {}
@@ -171,6 +220,7 @@ def build_index_entry(name: str, data: dict) -> dict:
         "pump_off_at_s": pump_off_s,
         "last_drop_at_s": data.get("last_drop_at_s"),
         "pump_time_s": pump_off_s,
+        "channeling": channeling,
         "dwell_s": data.get("dwell_s"),
         "acaia_start_at_s": data.get("acaia_start_at_s"),
         "acaia_stop_at_s": data.get("acaia_stop_at_s"),

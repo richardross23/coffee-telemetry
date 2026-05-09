@@ -154,9 +154,10 @@
     color: var(--dim); font-size: 10px;
     letter-spacing: 0.14em; text-transform: uppercase;
   }
-  #dwell-v, #peak-v {
+  #dwell-v, #peak-v, #channel-v {
     color: var(--fg); font-variant-numeric: tabular-nums; font-weight: 500;
   }
+  #channel-v.suspect { color: var(--warn); }
 
   /* tank widget — sits in the header */
   #tank-widget {
@@ -364,6 +365,7 @@
   .row .meta-line .grind  { color: var(--cream); font-variant-numeric: tabular-nums; }
   .row .meta-line .roast { color: var(--dim); }
   .row .meta-line .bag { color: var(--good); font-variant-numeric: tabular-nums; }
+  .row .meta-line .channel { color: var(--warn); }
 
   /* Edit metadata modal */
   #edit-overlay {
@@ -594,6 +596,7 @@
       <div id="hero-diagnostic">
         <span id="stat-dwell"><span class="dlabel">dwell</span> <span id="dwell-v">—s</span></span>
         <span id="stat-peak"><span class="dlabel">peak</span> <span id="peak-v">— g/s</span></span>
+        <span id="stat-channel"><span class="dlabel">channel</span> <span id="channel-v">—</span></span>
       </div>
       <!-- Tier 3: setup metadata, BEAN / GRIND labeled groups. -->
       <div id="shotinfo"></div>
@@ -720,9 +723,11 @@ const heroEl = $('hero');
 const tooltip = $('tooltip');
 const statDwell = $('stat-dwell');
 const statPeak = $('stat-peak');
+const statChannel = $('stat-channel');
 const statRatio = $('stat-ratio');
 const dwellV = $('dwell-v');
 const peakV = $('peak-v');
+const channelV = $('channel-v');
 const ratioV = $('ratio-v');
 const ttT = $('tt-t');
 const ttW = $('tt-w');
@@ -1010,6 +1015,36 @@ class ShotChart {
     let p = 0;
     for (const s of this.samples) if (s.f > p) p = s.f;
     return p;
+  }
+
+  // Channeling indicator: detrended flow excursions during extraction.
+  // A clean shot has flow that rises smoothly then plateaus; channels
+  // appear as positive spikes above the local trend. Returns the count
+  // of significant excursions (≥30% above the 3s rolling mean).
+  // Returns null if the shot is too short or pump_off isn't known.
+  channelingScore() {
+    const fdT = this.firstDropT();
+    const pumpOff = this.meta.pump_off_at_s;
+    if (fdT == null || pumpOff == null) return null;
+    // Extraction phase, skip the first 2s ramp-up.
+    const ext = this.samples.filter(s => s.t >= fdT + 2.0 && s.t <= pumpOff);
+    if (ext.length < 8) return null;
+    let meanFlow = 0;
+    for (const s of ext) meanFlow += s.f || 0;
+    meanFlow /= ext.length;
+    if (meanFlow <= 0.3) return null;
+    let count = 0;
+    for (let i = 0; i < ext.length; i++) {
+      // Local trend: 3s window around this point.
+      const t = ext[i].t;
+      let sum = 0, n = 0;
+      for (let j = 0; j < ext.length; j++) {
+        if (Math.abs(ext[j].t - t) <= 1.5) { sum += ext[j].f || 0; n++; }
+      }
+      const trend = n ? sum / n : meanFlow;
+      if ((ext[i].f || 0) - trend > 0.3 * meanFlow) count++;
+    }
+    return count;
   }
 
   // Time of the literal first drop — first index where weight stays
@@ -1310,6 +1345,19 @@ function showStats(p) {
     dwellV.style.color = '';
   }
   peakV.textContent = (p.peak_flow_g_s != null ? p.peak_flow_g_s.toFixed(2) : '—') + ' g/s';
+  // Channeling: ≥2 flow excursions above the local trend during
+  // extraction → puck likely had a channel form. Otherwise "clean".
+  const ch = p.channeling;
+  if (ch == null) {
+    channelV.textContent = '—';
+    channelV.classList.remove('suspect');
+    statChannel.classList.remove('visible');
+  } else {
+    const suspect = ch >= 2;
+    channelV.textContent = suspect ? `suspect (${ch})` : 'clean';
+    channelV.classList.toggle('suspect', suspect);
+    statChannel.classList.add('visible');
+  }
   if (p.brew_ratio_str) {
     ratioV.textContent = p.brew_ratio_str;
     statRatio.classList.add('visible');
@@ -1322,6 +1370,7 @@ function showStats(p) {
 function hideStats() {
   statDwell.classList.remove('visible');
   statPeak.classList.remove('visible');
+  statChannel.classList.remove('visible');
   statRatio.classList.remove('visible');
 }
 
@@ -1489,6 +1538,7 @@ client.on('message', (topic, msg) => {
       peak_flow_g_s: peak,
       brew_ratio_str: ratioStr,
       dwell_s: liveDwellSec,
+      channeling: chart.channelingScore(),
     });
     loadHistory();
   }
@@ -1570,6 +1620,9 @@ function renderHistory(items) {
     }
     if (it.metadata?.grinder_setting) meta2parts.push(`<span class="grind">${escapeHtml(it.metadata.grinder_setting)}</span>`);
     if (it.days_off_roast != null) meta2parts.push(`<span class="roast">${it.days_off_roast}d off roast</span>`);
+    if ((it.channeling ?? 0) >= 2) {
+      meta2parts.push(`<span class="channel" title="${it.channeling} flow excursions during extraction — possible channeling">~ channel</span>`);
+    }
     const bk = bagKey(it.metadata);
     if (bk && bagCounts[bk] > 1) {
       meta2parts.push(`<span class="bag">shot ${bagSequence[it.file]} of ${bagCounts[bk]}</span>`);
@@ -1914,6 +1967,7 @@ async function replayShot(file) {
       ...shot,
       peak_flow_g_s: peak,
       brew_ratio_str: ratioStr,
+      channeling: chart.channelingScore(),
     });
     setShotInfo(shot.metadata, parseSavedAt(file));
     loadHistory();
