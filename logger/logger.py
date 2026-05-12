@@ -103,6 +103,27 @@ def clip_outlier_samples(samples: list[dict]) -> list[dict]:
     ]
 
 
+def trim_post_shot_anomalies(samples: list[dict], pump_off_s: float | None,
+                              max_delta_g: float = 3.0) -> list[dict]:
+    """Truncate samples after pump_off at the first weight jump >3g from
+    the previous valid sample. Real after-drip is sub-gram drips and
+    plateau republishes; anything bigger is the user touching the scale."""
+    if pump_off_s is None or not samples:
+        return samples
+    out = []
+    prev_w = None
+    for s in samples:
+        t_s = (s.get("t_ms") or 0) / 1000.0
+        w = s.get("weight_g")
+        if t_s > pump_off_s and w is not None and prev_w is not None:
+            if abs(w - prev_w) > max_delta_g:
+                break
+        out.append(s)
+        if w is not None:
+            prev_w = w
+    return out
+
+
 def channeling_count(samples: list[dict], first_drop_ms: int,
                        pump_off_s: float) -> int | None:
     """Count flow excursions ≥30% above the local 3s rolling mean during
@@ -533,6 +554,16 @@ def handle_shot_end(shot_id: str, payload: dict) -> None:
     n_clipped = n_before - len(record["samples"])
     if n_clipped:
         log.info("shot %s: clipped %d out-of-range sample(s)", shot_id, n_clipped)
+
+    # Trim any cup-handling after the shot proper — sudden weight jumps
+    # after pump_off are the user touching the scale.
+    n_before = len(record["samples"])
+    record["samples"] = trim_post_shot_anomalies(
+        record["samples"], record.get("pump_off_at_s"),
+    )
+    n_trimmed = n_before - len(record["samples"])
+    if n_trimmed:
+        log.info("shot %s: trimmed %d post-shot anomalous sample(s)", shot_id, n_trimmed)
 
     # Reconcile final_weight_g against samples — shot/end's snapshot can
     # read low if the cup left the scale right before the publish.
