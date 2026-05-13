@@ -1437,38 +1437,49 @@ const client = mqtt.connect(wsUrl, {
   clientId: 'web-' + Math.random().toString(16).slice(2, 10),
   reconnectPeriod: 2000,
 });
+// Subscribe across both device namespaces so either the round-display
+// or the Lilygo Pro can drive the live UI. Dispatch by suffix.
+const MQTT_NAMESPACES = ['coffee', 'coffee-pro'];
+function topicSuffix(topic) {
+  for (const ns of MQTT_NAMESPACES) {
+    const prefix = ns + '/';
+    if (topic.startsWith(prefix)) return topic.slice(prefix.length);
+  }
+  return null;
+}
+
 client.on('connect', () => {
   statusEl.textContent = 'connected';
   statusEl.className = 'connected';
-  client.subscribe([
-    'coffee/shot/start', 'coffee/shot/sample', 'coffee/shot/end',
-    'coffee/scale/weight',
-    'coffee/water/pct', 'coffee/device/state',
-  ]);
+  const suffixes = ['shot/start', 'shot/sample', 'shot/end',
+                    'scale/weight', 'water/pct', 'device/state'];
+  client.subscribe(MQTT_NAMESPACES.flatMap(ns => suffixes.map(s => `${ns}/${s}`)));
 });
 client.on('error', (err) => { statusEl.textContent = `error: ${err.message}`; statusEl.className = 'error'; });
 client.on('reconnect', () => { statusEl.textContent = 'reconnecting'; statusEl.className = ''; });
 
 client.on('message', (topic, msg) => {
+  const suffix = topicSuffix(topic);
+  if (suffix == null) return;
   const text = msg.toString();
   let p; try { p = JSON.parse(text); } catch { p = text; }
 
-  if (topic === 'coffee/water/pct') {
+  if (suffix === 'water/pct') {
     const n = parseFloat(text);
     tankV.textContent = Number.isFinite(n) ? Math.round(n) : '—';
     return;
   }
-  if (topic === 'coffee/device/state') {
+  if (suffix === 'device/state') {
     deviceBadge.style.display = (text === 'online') ? 'none' : '';
     return;
   }
-  if (topic === 'coffee/scale/weight') {
+  if (suffix === 'scale/weight') {
     pushScale(parseFloat(text));
     return;
   }
   if (mode === 'replay') return;
 
-  if (topic === 'coffee/shot/start') {
+  if (suffix === 'shot/start') {
     activeShotId = p.shot_id;
     hideStats();
     setBadge('Extracting', 'extracting');
@@ -1490,7 +1501,7 @@ client.on('message', (topic, msg) => {
       .filter(e => e.ts >= cutoff && Math.abs(e.w) <= PREPEND_MAX_WEIGHT_G)
       .map(e => ({ t: (e.ts - startWall) / 1000, w: e.w, f: 0 }));
     chart.setShot(prepend, {});
-  } else if (topic === 'coffee/shot/sample') {
+  } else if (suffix === 'shot/sample') {
     if (activeShotId == null) {
       activeShotId = p.shot_id;
       setBadge('Extracting', 'extracting');
@@ -1501,7 +1512,7 @@ client.on('message', (topic, msg) => {
     setWeight(p.weight_g ?? 0);
     setElapsed(chart.elapsedAt(t));
     setFlow(chart.samples.at(-1)?.f);
-  } else if (topic === 'coffee/shot/end') {
+  } else if (suffix === 'shot/end') {
     activeShotId = null;
     // Firmware aborts (backflush, blind basket, no_flow, acaia_tare).
     // Leave live state where it was, badge back to Idle.
