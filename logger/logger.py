@@ -1,11 +1,16 @@
 """MQTT subscriber: writes one JSON file per shot and maintains a history index.
 
-Live path:  coffee/shot/{start,sample,end} → shots/<wallclock>_<id>.json
+Topics are accepted on either of the configured namespaces (see NAMESPACES),
+e.g. coffee/* (round-display device) or coffee-pro/* (Lilygo Pro). Both can
+publish simultaneously; we save the shot regardless of source. Acks are
+returned on the same namespace the shot arrived from.
+
+Live path:  <ns>/shot/{start,sample,end} → shots/<wallclock>_<id>.json
             (with a 10s rolling pre-shot weight buffer prepended).
-Raw path:   coffee/shot/raw chunks → reassemble → shots/<id>.json on the
-            coffee/shot/raw/complete marker, then ack on coffee/shot/ack/<id>.
-Edits:      coffee/shot/metadata/set merges whitelisted fields into a saved
-            shot; coffee/shot/delete removes one.
+Raw path:   <ns>/shot/raw chunks → reassemble → shots/<id>.json on the
+            <ns>/shot/raw/complete marker, then ack on <ns>/shot/ack/<id>.
+Edits:      <ns>/shot/metadata/set merges whitelisted fields into a saved
+            shot; <ns>/shot/delete removes one.
 """
 
 import datetime
@@ -27,14 +32,28 @@ OUT = os.environ.get("OUT_DIR", "/data/shots")
 BROKER = os.environ.get("MQTT_BROKER", "mosquitto")
 PORT = int(os.environ.get("MQTT_PORT", "1883"))
 
-T_START = "coffee/shot/start"
-T_SAMPLE = "coffee/shot/sample"
-T_END = "coffee/shot/end"
-T_RAW = "coffee/shot/raw"
-T_RAW_COMPLETE = "coffee/shot/raw/complete"
-T_SCALE_W = "coffee/scale/weight"
-T_META_SET = "coffee/shot/metadata/set"
-T_DELETE = "coffee/shot/delete"
+# Topic constants are the canonical (namespace-stripped) form used by the
+# handler dispatch. Real subscriptions enumerate all NAMESPACES so the
+# logger accepts publishes from either the round-display device or the
+# Lilygo Pro running in parallel.
+NAMESPACES = ("coffee", "coffee-pro")
+T_START = "shot/start"
+T_SAMPLE = "shot/sample"
+T_END = "shot/end"
+T_RAW = "shot/raw"
+T_RAW_COMPLETE = "shot/raw/complete"
+T_SCALE_W = "scale/weight"
+T_META_SET = "shot/metadata/set"
+T_DELETE = "shot/delete"
+
+
+def _topic_suffix(topic: str) -> tuple[str | None, str | None]:
+    """Return (namespace, suffix) for our topics, or (None, None) otherwise."""
+    for ns in NAMESPACES:
+        prefix = ns + "/"
+        if topic.startswith(prefix):
+            return ns, topic[len(prefix):]
+    return None, None
 
 # Whitelist of metadata fields the dashboard may set on a saved shot.
 META_ALLOWED_FIELDS = frozenset({
@@ -337,11 +356,10 @@ def on_connect(client, userdata, flags, rc, properties=None):
         log.error("connect failed rc=%s", rc)
         return
     log.info("connected to %s:%s", BROKER, PORT)
-    client.subscribe([
-        (T_START, 0), (T_SAMPLE, 0), (T_END, 0),
-        (T_RAW, 0), (T_RAW_COMPLETE, 1),  # QoS 1 — ack handshake
-        (T_SCALE_W, 0), (T_META_SET, 0), (T_DELETE, 0),
-    ])
+    qos = [(T_START, 0), (T_SAMPLE, 0), (T_END, 0),
+           (T_RAW, 0), (T_RAW_COMPLETE, 1),  # QoS 1 — ack handshake
+           (T_SCALE_W, 0), (T_META_SET, 0), (T_DELETE, 0)]
+    client.subscribe([(f"{ns}/{suf}", q) for ns in NAMESPACES for suf, q in qos])
 
 
 def delete_shot(file_basename: str) -> tuple[bool, str]:
@@ -456,7 +474,7 @@ def handle_raw_chunk(payload: bytes) -> None:
     _evict_stale_raw()
 
 
-def handle_raw_complete(client, payload: bytes) -> None:
+def handle_raw_complete(client, namespace: str, payload: bytes) -> None:
     try:
         marker = json.loads(payload)
     except json.JSONDecodeError as e:
@@ -496,8 +514,8 @@ def handle_raw_complete(client, payload: bytes) -> None:
     except OSError as e:
         log.error("raw %s: write failed (%s), not acking", sid, e)
         return
-    client.publish(f"coffee/shot/ack/{sid}", b"", qos=1)
-    log.info("raw %s: archived (%d bytes), acked", sid, len(body))
+    client.publish(f"{namespace}/shot/ack/{sid}", b"", qos=1)
+    log.info("raw %s: archived (%d bytes), acked on %s/", sid, len(body), namespace)
 
 
 def _evict_stale_raw() -> None:
@@ -597,14 +615,17 @@ def handle_shot_end(shot_id: str, payload: dict) -> None:
 
 
 def on_message(client, userdata, msg):
-    if msg.topic == T_SCALE_W:
+    ns, suffix = _topic_suffix(msg.topic)
+    if suffix is None:
+        return
+    if suffix == T_SCALE_W:
         handle_scale_weight(msg.payload)
         return
-    if msg.topic == T_RAW:
+    if suffix == T_RAW:
         handle_raw_chunk(msg.payload)
         return
-    if msg.topic == T_RAW_COMPLETE:
-        handle_raw_complete(client, msg.payload)
+    if suffix == T_RAW_COMPLETE:
+        handle_raw_complete(client, ns, msg.payload)
         return
 
     try:
@@ -613,7 +634,7 @@ def on_message(client, userdata, msg):
         log.warning("bad json on %s: %s", msg.topic, e)
         return
 
-    if msg.topic == T_META_SET:
+    if suffix == T_META_SET:
         file_name = payload.get("file")
         meta = payload.get("metadata") or {}
         if not file_name or not isinstance(meta, dict):
@@ -625,7 +646,7 @@ def on_message(client, userdata, msg):
             update_index(file_name)
         return
 
-    if msg.topic == T_DELETE:
+    if suffix == T_DELETE:
         file_name = payload.get("file")
         if not file_name:
             log.warning("bad delete payload: %r", payload)
@@ -641,11 +662,11 @@ def on_message(client, userdata, msg):
         log.warning("missing shot_id on %s: %r", msg.topic, payload)
         return
 
-    if msg.topic == T_START:
+    if suffix == T_START:
         handle_shot_start(shot_id, payload)
-    elif msg.topic == T_SAMPLE:
+    elif suffix == T_SAMPLE:
         handle_shot_sample(shot_id, payload)
-    elif msg.topic == T_END:
+    elif suffix == T_END:
         handle_shot_end(shot_id, payload)
 
 
