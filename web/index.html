@@ -1537,7 +1537,12 @@ client.on('message', (topic, msg) => {
     const pour = chart.pourTime();
     setElapsed(pumpOffAtS ?? pour);
     const peak = chart.peakFlow();
-    const avg = pour > 0 ? (p.final_weight_g ?? 0) / pour : 0;
+    // Avg flow uses pure extraction time (first drop → pump off) when
+    // both edges are known; falls back to pour time otherwise.
+    const extractT = (pumpOffAtS != null && liveDwellSec != null)
+      ? pumpOffAtS - liveDwellSec : null;
+    const avgDenom = extractT ?? pour;
+    const avg = avgDenom > 0 ? (p.final_weight_g ?? 0) / avgDenom : 0;
     flowLabel.textContent = 'avg';
     setFlow(avg);
     // Brew ratio uses sticky dose so it shows immediately on shot end.
@@ -1607,13 +1612,14 @@ function renderHistory(items) {
   }
   historyList.innerHTML = items.map(it => {
     const when = formatWhen(it.saved_at) || it.file;
-    // Prefer pump_time (pump_on → pump_off) — the canonical barista
-    // shot duration, same as the receipt's ELAPSED. Fall back to pour
-    // time, then firmware duration, for legacy shots without pump data.
+    // Displayed duration = pump_time (canonical barista clock), but
+    // avg flow uses the pure extraction window (first drop → pump
+    // off) so dwell + after-drip don't dilute the rate.
     const dt = it.pump_time_s ?? it.pour_time_s ?? it.duration_s;
     const dur = dt != null ? `${dt.toFixed(1)} s` : '—';
     const wt = it.final_weight_g != null ? `${it.final_weight_g.toFixed(1)}<span class="u">g</span>` : '—';
-    const avg = (it.final_weight_g && dt) ? it.final_weight_g / dt : null;
+    const avgDenom = it.extract_time_s ?? it.pour_time_s ?? dt;
+    const avg = (it.final_weight_g && avgDenom) ? it.final_weight_g / avgDenom : null;
     const avgStr = avg != null ? `${avg.toFixed(2)} g/s avg` : '';
     const tank = it.tank_pct_at_start != null ? `tank ${Math.round(it.tank_pct_at_start)}%` : '';
     const dwell = (it.dwell_s != null && it.dwell_s > 0) ? `${it.dwell_s.toFixed(1)}s dwell` : '';
@@ -1967,7 +1973,10 @@ async function replayShot(file) {
     const pour = chart.pourTime();
     setElapsed(shot.pump_off_at_s ?? pour);
     const peak = chart.peakFlow();
-    const avg = pour > 0 ? (shot.final_weight_g ?? 0) / pour : 0;
+    const extractT = (shot.pump_off_at_s != null && shot.dwell_s != null)
+      ? shot.pump_off_at_s - shot.dwell_s : null;
+    const avgDenom = extractT ?? pour;
+    const avg = avgDenom > 0 ? (shot.final_weight_g ?? 0) / avgDenom : 0;
     flowLabel.textContent = 'avg';
     setFlow(avg);
     if (shot.tank_pct_at_start != null) tankV.textContent = Math.round(shot.tank_pct_at_start);

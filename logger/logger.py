@@ -247,6 +247,15 @@ def build_index_entry(name: str, data: dict) -> dict:
         pour_time_s = None
 
     pump_off_s = data.get("pump_off_at_s")
+    dwell_s = data.get("dwell_s")
+    # Pure extraction window: first drop → pump off. Canonical
+    # denominator for "average flow rate" — excludes dwell and
+    # after-drip.
+    extract_time_s = (
+        pump_off_s - dwell_s
+        if pump_off_s is not None and dwell_s is not None
+        else None
+    )
     channeling = channeling_count(samples, first_t, pump_off_s)
 
     saved_at = parse_ts(name)
@@ -260,8 +269,9 @@ def build_index_entry(name: str, data: dict) -> dict:
         "pump_off_at_s": pump_off_s,
         "last_drop_at_s": data.get("last_drop_at_s"),
         "pump_time_s": pump_off_s,
+        "extract_time_s": extract_time_s,
         "channeling": channeling,
-        "dwell_s": data.get("dwell_s"),
+        "dwell_s": dwell_s,
         "acaia_start_at_s": data.get("acaia_start_at_s"),
         "acaia_stop_at_s": data.get("acaia_stop_at_s"),
         "acaia_stop_weight_g": data.get("acaia_stop_weight_g"),
