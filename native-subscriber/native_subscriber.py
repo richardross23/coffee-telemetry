@@ -50,7 +50,8 @@ WEIGHT_RANGE_G = (-5.0, 200.0)
 
 # Entity object_ids we care about. Keys filled at connect time.
 WATCH = {
-    "scale_weight__g_": None,
+    "scale_weight": None,
+    "scale_flow": None,
     "tank_percent_full": None,
     "shot_state": None,
     "shot_summary": None,
@@ -60,6 +61,7 @@ WATCH = {
 # --- in-memory state ---------------------------------------------------------
 
 _scale_buffer: deque = deque()   # (epoch_ts, weight_g) rolling 30 s
+_last_flow: float = 0.0
 _tank_pct: float | None = None
 _prev_shot_state: str = "IDLE"
 
@@ -94,7 +96,16 @@ def _on_scale_weight(value) -> None:
     _push_scale_buffer(now, w)
     if _shot is not None:
         t_ms = int((now - _shot.start_wall) * 1000)
-        _shot.samples.append({"t_ms": t_ms, "weight_g": w, "flow_g_s": 0.0})
+        _shot.samples.append({"t_ms": t_ms, "weight_g": w, "flow_g_s": _last_flow})
+
+
+def _on_scale_flow(value) -> None:
+    global _last_flow
+    if value is None: return
+    try: f = float(value)
+    except (TypeError, ValueError): return
+    if not math.isnan(f):
+        _last_flow = f
 
 
 def _on_tank_pct(value) -> None:
@@ -252,8 +263,10 @@ def _maybe_finalize() -> None:
 
 def _dispatch_state(state) -> None:
     key = state.key
-    if key == WATCH["scale_weight__g_"]:
+    if key == WATCH["scale_weight"]:
         _on_scale_weight(state.state)
+    elif key == WATCH["scale_flow"]:
+        _on_scale_flow(state.state)
     elif key == WATCH["tank_percent_full"]:
         _on_tank_pct(state.state)
     elif key == WATCH["shot_state"]:
@@ -271,6 +284,11 @@ async def _run() -> None:
     async def on_connect() -> None:
         log.info("connected to %s:%s", DEVICE_HOST, DEVICE_PORT)
         entities, _ = await client.list_entities_services()
+        log.info("entity surface (%d):", len(entities))
+        for e in entities:
+            log.info("  %s.%s (key=%d)",
+                     type(e).__name__.replace('Info', '').lower(),
+                     e.object_id, e.key)
         # Reset all watch keys then assign by object_id.
         for k in WATCH: WATCH[k] = None
         for e in entities:
@@ -279,7 +297,7 @@ async def _run() -> None:
         missing = [k for k, v in WATCH.items() if v is None]
         if missing:
             log.warning("entities not exposed by device: %s", missing)
-        await client.subscribe_states(_dispatch_state)
+        client.subscribe_states(_dispatch_state)
 
     async def on_disconnect(expected: bool) -> None:
         log.info("disconnected (expected=%s)", expected)
