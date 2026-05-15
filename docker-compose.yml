@@ -19,6 +19,21 @@ services:
     depends_on:
       - mosquitto
 
+  # ESPHome Native API subscriber — alternative to the MQTT logger.
+  # Runs in parallel during the transition; reads sensor state directly
+  # from the device, no broker hop.
+  native-subscriber:
+    build: ./native-subscriber
+    container_name: native-subscriber
+    restart: unless-stopped
+    environment:
+      DEVICE_HOST: "${DEVICE_HOST:-192.168.1.172}"
+      DEVICE_PORT: "${DEVICE_PORT:-6053}"
+      DEVICE_PASSWORD: "${DEVICE_PASSWORD:-}"
+      DEVICE_NAME: "${DEVICE_NAME:-coffee-tank}"
+    volumes:
+      - ./shots:/data/shots
+
   web:
     image: caddy:2-alpine
     container_name: coffee-web
