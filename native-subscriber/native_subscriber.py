@@ -127,8 +127,10 @@ def _on_shot_state(value) -> None:
 
     log.info("shot_state: %s → %s", _prev_shot_state, new_state)
 
-    if _prev_shot_state == "IDLE" and new_state == "PREINFUSION":
-        # Start of a new shot — open the buffer with 10 s of prepended scale.
+    # Open a new shot buffer when we see the first sign of a shot in
+    # progress — usually IDLE → PREINFUSION, but also IDLE → EXTRACTION
+    # if we reconnected mid-shot and missed the PREINFUSION transition.
+    if _shot is None and new_state in ("PREINFUSION", "EXTRACTION"):
         start = time.time()
         cutoff = start - PREPEND_LOOKBACK_SEC
         prepend = [
@@ -137,14 +139,13 @@ def _on_shot_state(value) -> None:
             if ts >= cutoff and abs(w) <= PREPEND_MAX_WEIGHT_G
         ]
         _shot = ShotInFlight(start_wall=start, prepend=prepend)
-        log.info("shot started (%d prepend samples)", len(prepend))
+        log.info("shot started at %s (%d prepend samples)", new_state, len(prepend))
 
     elif new_state == "DONE":
         _maybe_finalize()
 
     elif new_state == "IDLE" and _shot is not None:
-        # Belt-and-braces: clear if state machine returns to IDLE without DONE
-        # (shouldn't happen with current firmware but stays defensive).
+        # Belt-and-braces: clear if state machine returns to IDLE without DONE.
         log.warning("returned to IDLE with in-flight shot; discarding")
         _shot = None
 
@@ -216,15 +217,20 @@ async def _delete_remote(shot_id: int) -> None:
 
 
 def _on_shot_summary(value) -> None:
+    global _shot
     if not isinstance(value, str) or not value.strip(): return
     try:
         summary = json.loads(value)
     except json.JSONDecodeError as e:
         log.warning("shot_summary: bad JSON: %s", e)
         return
+    # Summary can land before we ever saw a state transition (subscriber
+    # restarted mid-shot, or missed PREINFUSION while disconnected). In
+    # that case build a minimal shot from the summary alone — no live
+    # sample stream, but the metadata still lands in history.
     if _shot is None:
-        log.warning("shot_summary arrived with no in-flight shot")
-        return
+        log.info("shot_summary arrived without a tracked shot; saving from summary alone")
+        _shot = ShotInFlight(start_wall=time.time(), prepend=[])
     _shot.summary = summary
     log.info("shot_summary: shot_id=%s aborted=%s final=%sg",
              summary.get("shot_id"), summary.get("aborted"),
