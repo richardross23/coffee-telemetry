@@ -26,16 +26,19 @@ import json
 import logging
 import math
 import os
+import re
 import sys
 import time
 from collections import deque
 
+import aiohttp
 from aioesphomeapi import APIClient, ReconnectLogic
 
 log = logging.getLogger("native-subscriber")
 
 DEVICE_HOST = os.environ.get("DEVICE_HOST", "192.168.2.29")
 DEVICE_PORT = int(os.environ.get("DEVICE_PORT", "6053"))
+DEVICE_HTTP_PORT = int(os.environ.get("DEVICE_HTTP_PORT", "8080"))
 DEVICE_PASSWORD = os.environ.get("DEVICE_PASSWORD", "")
 # Noise PSK from the device's `api.encryption.key`. Required if the
 # firmware has encryption enabled (it always is on the Pro by default).
@@ -55,6 +58,7 @@ WATCH = {
     "tank_percent_full": None,
     "shot_state": None,
     "shot_summary": None,
+    "shot_archive_status": None,
 }
 
 
@@ -145,6 +149,70 @@ def _on_shot_state(value) -> None:
         _shot = None
 
     _prev_shot_state = new_state
+
+
+_PENDING_RE = re.compile(r"pending\s+id\s*=\s*(\d+)", re.IGNORECASE)
+_raw_lock = asyncio.Lock()
+
+
+def _on_shot_archive_status(value) -> None:
+    """text_sensor.shot_archive_status — 'idle' or 'pending id=<n>'.
+    When pending, fetch the raw JSON, write to disk, then DELETE."""
+    if not isinstance(value, str):
+        return
+    m = _PENDING_RE.search(value)
+    if not m:
+        return  # 'idle' or unrecognised
+    shot_id = int(m.group(1))
+    # Fire-and-forget — the state callback can't await; spin a task.
+    asyncio.create_task(_fetch_and_archive(shot_id))
+
+
+async def _fetch_and_archive(shot_id: int) -> None:
+    """GET the raw JSON, save to OUT_DIR/<shot_id>.json, then DELETE.
+    Lock prevents overlapping fetches if the status sensor flaps."""
+    async with _raw_lock:
+        path = os.path.join(OUT_DIR, f"{shot_id}.json")
+        if os.path.exists(path):
+            log.info("raw %s: already archived locally; deleting on device", shot_id)
+            await _delete_remote(shot_id)
+            return
+        url = f"http://{DEVICE_HOST}:{DEVICE_HTTP_PORT}/shots/{shot_id}.json"
+        try:
+            async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=10)) as s:
+                async with s.get(url) as r:
+                    if r.status != 200:
+                        log.warning("raw %s: GET %s → %d", shot_id, url, r.status)
+                        return
+                    body = await r.read()
+        except (aiohttp.ClientError, asyncio.TimeoutError) as e:
+            log.warning("raw %s: fetch failed: %s", shot_id, e)
+            return
+        # Disk write must succeed BEFORE we DELETE; device retains otherwise.
+        tmp = path + ".tmp"
+        try:
+            with open(tmp, "wb") as f:
+                f.write(body)
+            os.replace(tmp, path)
+        except OSError as e:
+            log.error("raw %s: write failed: %s", shot_id, e)
+            return
+        log.info("raw %s: archived (%d bytes)", shot_id, len(body))
+        await _delete_remote(shot_id)
+
+
+async def _delete_remote(shot_id: int) -> None:
+    url = f"http://{DEVICE_HOST}:{DEVICE_HTTP_PORT}/shots/{shot_id}.json"
+    try:
+        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=10)) as s:
+            async with s.delete(url) as r:
+                if r.status not in (200, 204):
+                    log.warning("raw %s: DELETE → %d (will retry on next status emit)",
+                                shot_id, r.status)
+                else:
+                    log.info("raw %s: acked on device", shot_id)
+    except (aiohttp.ClientError, asyncio.TimeoutError) as e:
+        log.warning("raw %s: DELETE failed: %s", shot_id, e)
 
 
 def _on_shot_summary(value) -> None:
@@ -273,6 +341,8 @@ def _dispatch_state(state) -> None:
         _on_shot_state(state.state)
     elif key == WATCH["shot_summary"]:
         _on_shot_summary(state.state)
+    elif key == WATCH["shot_archive_status"]:
+        _on_shot_archive_status(state.state)
 
 
 async def _run() -> None:
