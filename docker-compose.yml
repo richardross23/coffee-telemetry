@@ -27,7 +27,7 @@ services:
     container_name: native-subscriber
     restart: unless-stopped
     environment:
-      DEVICE_HOST: "${DEVICE_HOST:-192.168.2.29}"
+      DEVICE_HOST: "${DEVICE_HOST:-192.168.1.27}"
       DEVICE_PORT: "${DEVICE_PORT:-6053}"
       DEVICE_HTTP_PORT: "${DEVICE_HTTP_PORT:-8080}"
       DEVICE_PASSWORD: "${DEVICE_PASSWORD:-}"
