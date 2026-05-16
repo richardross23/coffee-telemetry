@@ -22,6 +22,7 @@ summary path.
 
 import asyncio
 import datetime
+import glob
 import json
 import logging
 import math
@@ -250,6 +251,102 @@ def _clip_outliers(samples: list[dict]) -> list[dict]:
             if s.get("weight_g") is None or lo <= s["weight_g"] <= hi]
 
 
+INDEX_NAME = "index.json"
+FILENAME_TS_RE = re.compile(r"^(\d{8}T\d{6}Z)_")
+
+
+def _parse_ts(filename: str) -> str:
+    m = FILENAME_TS_RE.match(filename)
+    if not m: return ""
+    s = m.group(1)
+    return f"{s[0:4]}-{s[4:6]}-{s[6:8]}T{s[9:11]}:{s[11:13]}:{s[13:15]}Z"
+
+
+def _first_drop_t_ms(samples: list[dict], threshold: float = 0.1) -> int | None:
+    consecutive = 0
+    for i, s in enumerate(samples):
+        if (s.get("weight_g") or 0) >= threshold:
+            consecutive += 1
+            if consecutive >= 2: return samples[i - 1].get("t_ms")
+        else: consecutive = 0
+    return None
+
+
+def _index_entry(name: str, data: dict) -> dict:
+    """Minimal index entry — mirrors the MQTT shot-logger's build_index_entry
+    so the dashboard's history list reads either source identically."""
+    samples = data.get("samples") or []
+    first_t = _first_drop_t_ms(samples)
+    last_t = samples[-1].get("t_ms") if samples else None
+    acaia_stop_s = data.get("acaia_stop_at_s")
+    if acaia_stop_s is not None and first_t is not None:
+        pour_time_s = acaia_stop_s - first_t / 1000.0
+    elif first_t is not None and last_t is not None:
+        pour_time_s = (last_t - first_t) / 1000.0
+    else:
+        pour_time_s = None
+    pump_off_s = data.get("pump_off_at_s")
+    dwell_s = data.get("dwell_s")
+    extract_time_s = (pump_off_s - dwell_s
+                      if pump_off_s is not None and dwell_s is not None else None)
+    saved_at = _parse_ts(name)
+    meta = data.get("metadata") or {}
+    entry = {
+        "file": name,
+        "saved_at": saved_at,
+        "shot_id": data.get("shot_id"),
+        "duration_s": data.get("duration_s"),
+        "pour_time_s": pour_time_s,
+        "pump_off_at_s": pump_off_s,
+        "last_drop_at_s": data.get("last_drop_at_s"),
+        "pump_time_s": pump_off_s,
+        "extract_time_s": extract_time_s,
+        "dwell_s": dwell_s,
+        "acaia_start_at_s": data.get("acaia_start_at_s"),
+        "acaia_stop_at_s": data.get("acaia_stop_at_s"),
+        "acaia_stop_weight_g": data.get("acaia_stop_weight_g"),
+        "final_weight_g": data.get("final_weight_g"),
+        "peak_flow_g_s": data.get("peak_flow_g_s"),
+        "tank_pct_at_start": data.get("tank_pct_at_start"),
+        "n_samples": len(samples),
+        "metadata": meta,
+    }
+    # Bean label / brew_ratio_str / days_off_roast — derived from metadata.
+    dose = meta.get("ground_weight_g") or meta.get("bean_weight_g")
+    final_w = data.get("final_weight_g")
+    if dose and final_w and dose > 0:
+        entry["brew_ratio_str"] = f"1:{(final_w / dose):.2f}"
+    roast = meta.get("roast_date")
+    if roast and saved_at:
+        try:
+            roast_d = datetime.date.fromisoformat(roast)
+            saved_d = datetime.datetime.fromisoformat(
+                saved_at.replace("Z", "+00:00")).date()
+            entry["days_off_roast"] = (saved_d - roast_d).days
+        except (ValueError, TypeError): pass
+    label = " · ".join(p for p in (meta.get("bean_brand"), meta.get("bean_type")) if p)
+    if label: entry["bean_label"] = label
+    return entry
+
+
+def _rebuild_index() -> None:
+    """Full disk scan, write shots/index.json. Cheap at our shot volume."""
+    entries = []
+    for path in glob.glob(os.path.join(OUT_DIR, "*.json")):
+        name = os.path.basename(path)
+        if name == INDEX_NAME or not FILENAME_TS_RE.match(name):
+            continue
+        try:
+            with open(path) as f: data = json.load(f)
+        except (OSError, json.JSONDecodeError):
+            continue
+        entries.append(_index_entry(name, data))
+    entries.sort(key=lambda e: e["file"], reverse=True)
+    tmp = os.path.join(OUT_DIR, INDEX_NAME + ".tmp")
+    with open(tmp, "w") as f: json.dump(entries, f, indent=2)
+    os.replace(tmp, os.path.join(OUT_DIR, INDEX_NAME))
+
+
 def _trim_post_shot_anomalies(samples: list[dict], pump_off_s: float | None,
                                 max_delta_g: float = 3.0) -> list[dict]:
     """Truncate samples after pump_off at the first weight jump >3g —
@@ -330,6 +427,7 @@ def _maybe_finalize() -> None:
     log.info("saved %s (%d samples, %sg in %ss)",
              name, len(record["samples"]),
              record.get("final_weight_g"), record.get("duration_s"))
+    _rebuild_index()
     _shot = None
 
 
