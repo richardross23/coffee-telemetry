@@ -34,7 +34,7 @@ from aioesphomeapi import APIClient, ReconnectLogic
 
 log = logging.getLogger("native-subscriber")
 
-DEVICE_HOST = os.environ.get("DEVICE_HOST", "192.168.1.27")
+DEVICE_HOST = os.environ.get("DEVICE_HOST", "192.168.2.29")
 DEVICE_PORT = int(os.environ.get("DEVICE_PORT", "6053"))
 DEVICE_PASSWORD = os.environ.get("DEVICE_PASSWORD", "")
 # Noise PSK from the device's `api.encryption.key`. Required if the
