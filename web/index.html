@@ -713,6 +713,7 @@ const $ = (id) => document.getElementById(id);
 const statusEl = $('status');
 const stateBadge = $('state-badge');
 const deviceBadge = $('device-badge');
+const deviceOnlineByNs = {}; // { coffee: true, 'coffee-pro': false } — see device/state handler
 const tankV = $('tank-v');
 const weightV = document.querySelector('#weight .v');
 const elapsedV = $('elapsed-v');
@@ -1049,11 +1050,14 @@ class ShotChart {
 
   // Time of the literal first drop — first index where weight stays
   // above 0.1g for two consecutive samples (single-sample spikes don't
-  // count). Returns null if no drop yet.
+  // count). Samples with t<0 are pre-pump-on prepend-buffer noise
+  // (cup-placement, jitter) and cannot be the first extraction drop.
+  // Returns null if no drop yet.
   firstDropT() {
     const threshold = 0.1;
     let consecutive = 0;
     for (let i = 0; i < this.samples.length; i++) {
+      if ((this.samples[i].t ?? 0) < 0) continue;
       if ((this.samples[i].w || 0) >= threshold) {
         consecutive++;
         if (consecutive >= 2) return this.samples[i - 1].t;
@@ -1470,7 +1474,13 @@ client.on('message', (topic, msg) => {
     return;
   }
   if (suffix === 'device/state') {
-    deviceBadge.style.display = (text === 'online') ? 'none' : '';
+    // Track availability per namespace. The Pro's retained LWT can be
+    // "offline" while the round device is still online — only show the
+    // badge if no namespace is currently reporting online.
+    const ns = topic.split('/')[0];
+    deviceOnlineByNs[ns] = (text === 'online');
+    const anyOnline = Object.values(deviceOnlineByNs).some(Boolean);
+    deviceBadge.style.display = anyOnline ? 'none' : '';
     return;
   }
   if (suffix === 'scale/weight') {
