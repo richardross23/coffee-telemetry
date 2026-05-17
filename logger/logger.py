@@ -123,10 +123,11 @@ def clip_outlier_samples(samples: list[dict]) -> list[dict]:
 
 
 def trim_post_shot_anomalies(samples: list[dict], pump_off_s: float | None,
-                              max_delta_g: float = 3.0) -> list[dict]:
-    """Truncate samples after pump_off at the first weight jump >3g from
+                              max_delta_g: float = 2.0) -> list[dict]:
+    """Truncate samples after pump_off at the first weight jump >2g from
     the previous valid sample. Real after-drip is sub-gram drips and
-    plateau republishes; anything bigger is the user touching the scale."""
+    plateau republishes; anything bigger is the user touching the scale
+    (grabbing the cup creates downward pressure that reads as +mass)."""
     if pump_off_s is None or not samples:
         return samples
     out = []
