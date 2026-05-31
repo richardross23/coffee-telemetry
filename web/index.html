@@ -1635,16 +1635,18 @@ function bagKey(meta) {
 function renderRISpark(items) {
   const spark = document.getElementById('ri-spark');
   if (!spark) return;
+  // Sparkline uses the rolling-baseline RI (reactive — shows drift between
+  // consecutive shots). The chips use the absolute per-bag baseline.
   // items arrive newest-first; reverse so oldest renders left, newest right.
   const ris = items.slice(0, 10).reverse()
-    .filter(it => typeof it.resistance_index === 'number')
-    .map(it => it.resistance_index);
+    .filter(it => typeof it.resistance_index_rolling === 'number')
+    .map(it => it.resistance_index_rolling);
   if (!ris.length) { spark.innerHTML = ''; return; }
   const max = Math.max(2, ...ris.map(Math.abs));   // scale to ±max, floor at 2σ
   spark.innerHTML = ris.map(ri => {
     const h = Math.max(2, Math.round(Math.abs(ri) / max * 12));
     const cls = Math.abs(ri) > 1.5 ? 'big' : (ri > 0 ? 'pos' : (ri < 0 ? 'neg' : ''));
-    return `<span class="dot ${cls}" style="height:${h}px" title="${ri >= 0 ? '+' : ''}${ri.toFixed(2)}σ"></span>`;
+    return `<span class="dot ${cls}" style="height:${h}px" title="${ri >= 0 ? '+' : ''}${ri.toFixed(2)}σ rolling"></span>`;
   }).join('');
 }
 
@@ -1697,14 +1699,15 @@ function renderHistory(items) {
     }
     if (typeof it.resistance_index === 'number') {
       const ri = it.resistance_index;
-      // Bands derived from analysis of 90-shot history (rolling-baseline σ ≈ 1.5).
-      // ±0.5σ acts as the "hold" window; ±1.5σ triggers a stronger recommendation.
+      // Chip uses the absolute per-bag baseline (this shot vs all other
+      // shots in the same bag). ±0.5σ = hold; ±1.5σ = stronger recommendation.
+      // Sparkline (header) uses the rolling baseline for trend visibility.
       let cls, lbl, tip;
-      if      (ri >  1.5) { cls = 'ri-coarser2'; lbl = `+${ri.toFixed(1)}σ ⇢ coarser ×2`; tip = 'Puck much more resistive than recent — go 2 clicks coarser'; }
-      else if (ri >  0.5) { cls = 'ri-coarser1'; lbl = `+${ri.toFixed(1)}σ ⇢ coarser`;    tip = 'Puck more resistive than recent — 1 click coarser (confirm next shot)'; }
-      else if (ri < -1.5) { cls = 'ri-finer2';   lbl = `${ri.toFixed(1)}σ ⇠ finer ×2`;    tip = 'Puck much less resistive than recent — go 2 clicks finer'; }
-      else if (ri < -0.5) { cls = 'ri-finer1';   lbl = `${ri.toFixed(1)}σ ⇠ finer`;       tip = 'Puck less resistive than recent — 1 click finer (confirm next shot)'; }
-      else                { cls = 'ri-hold';     lbl = `${ri >= 0 ? '+' : ''}${ri.toFixed(1)}σ hold`; tip = 'Puck operating in normal range — hold grind'; }
+      if      (ri >  1.5) { cls = 'ri-coarser2'; lbl = `+${ri.toFixed(1)}σ ⇢ coarser ×2`; tip = 'Puck much more resistive than your normal for this bag — go 2 clicks coarser'; }
+      else if (ri >  0.5) { cls = 'ri-coarser1'; lbl = `+${ri.toFixed(1)}σ ⇢ coarser`;    tip = 'Puck more resistive than your normal for this bag — 1 click coarser (confirm next shot)'; }
+      else if (ri < -1.5) { cls = 'ri-finer2';   lbl = `${ri.toFixed(1)}σ ⇠ finer ×2`;    tip = 'Puck much less resistive than your normal for this bag — go 2 clicks finer'; }
+      else if (ri < -0.5) { cls = 'ri-finer1';   lbl = `${ri.toFixed(1)}σ ⇠ finer`;       tip = 'Puck less resistive than your normal for this bag — 1 click finer (confirm next shot)'; }
+      else                { cls = 'ri-hold';     lbl = `${ri >= 0 ? '+' : ''}${ri.toFixed(1)}σ hold`; tip = 'Puck operating in normal range for this bag — hold grind'; }
       meta2parts.push(`<span class="ri ${cls}" title="${tip}">${lbl}</span>`);
     }
     const bk = bagKey(it.metadata);

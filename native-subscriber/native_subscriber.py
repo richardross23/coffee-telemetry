@@ -330,15 +330,18 @@ def _index_entry(name: str, data: dict) -> dict:
 
 
 # --- Puck Resistance Index (mirrors logger.py:compute_resistance_index) ----
-# Composite z-score of dwell + pour − peak_flow vs a rolling window of
-# prior shots from the same bag. Tells the operator if the puck is running
-# more or less resistive than recent history (input to grind decision).
-# Kept in sync with logger.py — different Docker images, can't share code.
+# Composite z-score of dwell + pour − peak_flow_g_s. Two variants:
+#   resistance_index         vs ALL other same-bag entries (absolute) —
+#                            drives the chip + grind-direction recommendation.
+#   resistance_index_rolling vs the last RI_WINDOW prior same-bag entries —
+#                            drives the trend sparkline only.
+# See logger.py for the rationale. Kept in sync — different Docker images.
 
 import statistics  # noqa: E402
 
 RI_WINDOW = 7
-RI_MIN_PRIORS = 5
+RI_MIN_PRIORS_ROLLING = 5
+RI_MIN_PRIORS_ABSOLUTE = 10
 
 
 def _bag_key(meta: dict) -> tuple:
@@ -349,16 +352,16 @@ def _bag_key(meta: dict) -> tuple:
             meta.get("roast_date") or "")
 
 
-def _compute_resistance_index(target: dict, priors: list[dict]):
+def _compute_resistance_index(target: dict, baseline: list[dict], min_priors: int):
     td = target.get("dwell_s")
     tp = target.get("pour_time_s")
     tk = target.get("peak_flow_g_s")
     if td is None or tp is None or tk is None:
         return None
     def col(k):
-        return [p[k] for p in priors if p.get(k) is not None]
+        return [p[k] for p in baseline if p.get(k) is not None]
     d = col("dwell_s"); p = col("pour_time_s"); k = col("peak_flow_g_s")
-    if min(len(d), len(p), len(k)) < RI_MIN_PRIORS:
+    if min(len(d), len(p), len(k)) < min_priors:
         return None
     try:
         d_sd, p_sd, k_sd = statistics.stdev(d), statistics.stdev(p), statistics.stdev(k)
@@ -374,15 +377,20 @@ def _compute_resistance_index(target: dict, priors: list[dict]):
 
 def _annotate_resistance_indices(entries: list[dict]) -> None:
     by_bag: dict[tuple, list[dict]] = {}
-    for e in sorted(entries, key=lambda x: x.get("saved_at") or x.get("file") or ""):
-        key = _bag_key(e.get("metadata") or {})
-        window = (by_bag.get(key) or [])[-RI_WINDOW:]
-        ri = _compute_resistance_index(e, window)
-        if ri is not None:
-            e["resistance_index"] = round(ri, 3)
-        else:
-            e.pop("resistance_index", None)
-        by_bag.setdefault(key, []).append(e)
+    for e in entries:
+        by_bag.setdefault(_bag_key(e.get("metadata") or {}), []).append(e)
+    for bag_entries in by_bag.values():
+        bag_sorted = sorted(bag_entries,
+                            key=lambda x: x.get("saved_at") or x.get("file") or "")
+        for i, e in enumerate(bag_sorted):
+            others = bag_sorted[:i] + bag_sorted[i + 1:]
+            ri_abs = _compute_resistance_index(e, others, RI_MIN_PRIORS_ABSOLUTE)
+            window = bag_sorted[max(0, i - RI_WINDOW):i]
+            ri_roll = _compute_resistance_index(e, window, RI_MIN_PRIORS_ROLLING)
+            if ri_abs is not None: e["resistance_index"] = round(ri_abs, 3)
+            else: e.pop("resistance_index", None)
+            if ri_roll is not None: e["resistance_index_rolling"] = round(ri_roll, 3)
+            else: e.pop("resistance_index_rolling", None)
 
 
 def _rebuild_index() -> None:

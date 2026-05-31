@@ -288,22 +288,38 @@ def build_index_entry(name: str, data: dict) -> dict:
 
 
 # --- Puck Resistance Index ---------------------------------------------------
-# A single z-scored composite of dwell + pour + (-)peak_flow, baselined
-# against a rolling window of recent same-bag shots. Tells the operator
-# whether the puck is running more or less resistive than recent history;
-# direct input to the "go finer / hold / go coarser" decision.
+# A single z-scored composite of dwell + pour + (-)peak_flow_g_s. Two
+# variants are computed and stored per shot — they answer different
+# questions and should not be conflated.
 #
-# RI > 0: more resistive than recent → coarser
-# RI < 0: less resistive than recent → finer
-# Units: σ of the rolling window. See ±0.5 / ±1.5 thresholds in the dashboard.
+#   resistance_index         baselined against ALL other same-bag shots
+#                            ("is this puck on target vs how I usually
+#                            pull this bag?") — prescriptive, drives the
+#                            chip + grind-direction recommendation.
+#                            Stable; doesn't drift with the last few shots.
+#
+#   resistance_index_rolling baselined against the last RI_WINDOW prior
+#                            same-bag shots ("did this puck differ from
+#                            the very recent ones?") — descriptive, drives
+#                            the trend sparkline only. Reactive by design.
+#
+# Sign convention for both: RI > 0 = more resistive than baseline (puck
+# tight / fine → consider coarser). RI < 0 = less resistive (puck loose
+# / coarse → consider finer). Units: σ of the respective baseline.
+#
+# An earlier version used only the rolling RI for the chip — it reinforced
+# drift instead of correcting toward the operator's normal. The absolute
+# (per-bag) baseline is the one to act on; rolling is just for spotting
+# session-scale drift.
 
-RI_WINDOW = 7          # prior same-bag shots to baseline against
-RI_MIN_PRIORS = 5      # below this we can't compute a stable z-score
+RI_WINDOW = 7              # rolling-baseline window (sparkline)
+RI_MIN_PRIORS_ROLLING = 5
+RI_MIN_PRIORS_ABSOLUTE = 10  # demand a real population before z-scoring
 
 
 def _bag_key(meta: dict) -> tuple:
     """Same bag = same brand, type, AND roast date. Different roast dates
-    of the same coffee are different bags and reset the rolling window."""
+    of the same coffee are different bags and reset both baselines."""
     if not meta:
         return ()
     return (meta.get("bean_brand") or "",
@@ -311,12 +327,13 @@ def _bag_key(meta: dict) -> tuple:
             meta.get("roast_date") or "")
 
 
-def compute_resistance_index(target: dict, priors: list[dict]) -> float | None:
-    """RI = mean of z(dwell), z(pour), -z(peak_flow) against `priors`.
+def compute_resistance_index(target: dict, baseline: list[dict],
+                              min_priors: int) -> float | None:
+    """RI = mean of z(dwell), z(pour), -z(peak_flow) against `baseline`.
 
-    Returns None if target lacks any of the three inputs, or the prior
-    window has fewer than RI_MIN_PRIORS usable entries, or any input's
-    SD across the window is zero (degenerate)."""
+    Returns None if target lacks any of the three inputs, or `baseline`
+    has fewer than `min_priors` usable entries, or any input's SD across
+    the baseline is zero (degenerate)."""
     td = target.get("dwell_s")
     tp = target.get("pour_time_s")
     tk = target.get("peak_flow_g_s")
@@ -324,9 +341,9 @@ def compute_resistance_index(target: dict, priors: list[dict]) -> float | None:
         return None
 
     def col(k):
-        return [p[k] for p in priors if p.get(k) is not None]
+        return [p[k] for p in baseline if p.get(k) is not None]
     dwells = col("dwell_s"); pours = col("pour_time_s"); peaks = col("peak_flow_g_s")
-    if min(len(dwells), len(pours), len(peaks)) < RI_MIN_PRIORS:
+    if min(len(dwells), len(pours), len(peaks)) < min_priors:
         return None
     try:
         zd_sd = statistics.stdev(dwells)
@@ -343,21 +360,38 @@ def compute_resistance_index(target: dict, priors: list[dict]) -> float | None:
 
 
 def _annotate_resistance_indices(entries: list[dict]) -> None:
-    """Walk entries oldest-first, attach `resistance_index` to each one
-    computed against the prior RI_WINDOW same-bag entries. Mutates in
-    place. Call before sorting newest-first for write."""
+    """Compute both RI variants per entry. Mutates in place; call before
+    sorting newest-first for write.
+
+    Absolute baseline = all other same-bag entries (target excluded so
+    extreme shots don't moderate their own z-score). Rolling baseline =
+    last RI_WINDOW prior same-bag entries (chronological)."""
     by_bag: dict[tuple, list[dict]] = {}
-    chrono = sorted(entries, key=lambda e: e.get("saved_at") or e.get("file") or "")
-    for e in chrono:
-        meta = e.get("metadata") or {}
-        key = _bag_key(meta)
-        window = (by_bag.get(key) or [])[-RI_WINDOW:]
-        ri = compute_resistance_index(e, window)
-        if ri is not None:
-            e["resistance_index"] = round(ri, 3)
-        else:
-            e.pop("resistance_index", None)
-        by_bag.setdefault(key, []).append(e)
+    for e in entries:
+        by_bag.setdefault(_bag_key(e.get("metadata") or {}), []).append(e)
+
+    chrono_keys = {id(e): i for i, e in enumerate(
+        sorted(entries, key=lambda x: x.get("saved_at") or x.get("file") or ""))}
+
+    for bag_key, bag_entries in by_bag.items():
+        # Sort the bag chronologically so "prior" is unambiguous for rolling.
+        bag_sorted = sorted(bag_entries, key=lambda x: x.get("saved_at") or x.get("file") or "")
+        for i, e in enumerate(bag_sorted):
+            # Absolute: all OTHER entries in the bag.
+            others = bag_sorted[:i] + bag_sorted[i + 1:]
+            ri_abs = compute_resistance_index(e, others, RI_MIN_PRIORS_ABSOLUTE)
+            # Rolling: the last RI_WINDOW priors before this entry.
+            window = bag_sorted[max(0, i - RI_WINDOW):i]
+            ri_roll = compute_resistance_index(e, window, RI_MIN_PRIORS_ROLLING)
+
+            if ri_abs is not None:
+                e["resistance_index"] = round(ri_abs, 3)
+            else:
+                e.pop("resistance_index", None)
+            if ri_roll is not None:
+                e["resistance_index_rolling"] = round(ri_roll, 3)
+            else:
+                e.pop("resistance_index_rolling", None)
 
 
 # --- Index cache: in-memory mirror of shots/index.json -----------------------
