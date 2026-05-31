@@ -20,6 +20,7 @@ import logging
 import math
 import os
 import re
+import statistics
 import sys
 import time
 from collections import defaultdict, deque
@@ -286,6 +287,79 @@ def build_index_entry(name: str, data: dict) -> dict:
     return entry
 
 
+# --- Puck Resistance Index ---------------------------------------------------
+# A single z-scored composite of dwell + pour + (-)peak_flow, baselined
+# against a rolling window of recent same-bag shots. Tells the operator
+# whether the puck is running more or less resistive than recent history;
+# direct input to the "go finer / hold / go coarser" decision.
+#
+# RI > 0: more resistive than recent → coarser
+# RI < 0: less resistive than recent → finer
+# Units: σ of the rolling window. See ±0.5 / ±1.5 thresholds in the dashboard.
+
+RI_WINDOW = 7          # prior same-bag shots to baseline against
+RI_MIN_PRIORS = 5      # below this we can't compute a stable z-score
+
+
+def _bag_key(meta: dict) -> tuple:
+    """Same bag = same brand, type, AND roast date. Different roast dates
+    of the same coffee are different bags and reset the rolling window."""
+    if not meta:
+        return ()
+    return (meta.get("bean_brand") or "",
+            meta.get("bean_type") or "",
+            meta.get("roast_date") or "")
+
+
+def compute_resistance_index(target: dict, priors: list[dict]) -> float | None:
+    """RI = mean of z(dwell), z(pour), -z(peak_flow) against `priors`.
+
+    Returns None if target lacks any of the three inputs, or the prior
+    window has fewer than RI_MIN_PRIORS usable entries, or any input's
+    SD across the window is zero (degenerate)."""
+    td = target.get("dwell_s")
+    tp = target.get("pour_time_s")
+    tk = target.get("peak_flow_g_s")
+    if td is None or tp is None or tk is None:
+        return None
+
+    def col(k):
+        return [p[k] for p in priors if p.get(k) is not None]
+    dwells = col("dwell_s"); pours = col("pour_time_s"); peaks = col("peak_flow_g_s")
+    if min(len(dwells), len(pours), len(peaks)) < RI_MIN_PRIORS:
+        return None
+    try:
+        zd_sd = statistics.stdev(dwells)
+        zp_sd = statistics.stdev(pours)
+        zk_sd = statistics.stdev(peaks)
+    except statistics.StatisticsError:
+        return None
+    if zd_sd == 0 or zp_sd == 0 or zk_sd == 0:
+        return None
+    zd = (td - statistics.mean(dwells)) / zd_sd
+    zp = (tp - statistics.mean(pours))  / zp_sd
+    zk = (tk - statistics.mean(peaks))  / zk_sd
+    return (zd + zp - zk) / 3.0
+
+
+def _annotate_resistance_indices(entries: list[dict]) -> None:
+    """Walk entries oldest-first, attach `resistance_index` to each one
+    computed against the prior RI_WINDOW same-bag entries. Mutates in
+    place. Call before sorting newest-first for write."""
+    by_bag: dict[tuple, list[dict]] = {}
+    chrono = sorted(entries, key=lambda e: e.get("saved_at") or e.get("file") or "")
+    for e in chrono:
+        meta = e.get("metadata") or {}
+        key = _bag_key(meta)
+        window = (by_bag.get(key) or [])[-RI_WINDOW:]
+        ri = compute_resistance_index(e, window)
+        if ri is not None:
+            e["resistance_index"] = round(ri, 3)
+        else:
+            e.pop("resistance_index", None)
+        by_bag.setdefault(key, []).append(e)
+
+
 # --- Index cache: in-memory mirror of shots/index.json -----------------------
 _index: dict[str, dict] = {}
 
@@ -331,8 +405,13 @@ def remove_from_index(name: str) -> None:
 
 
 def write_index() -> None:
-    """Atomically write the index sorted by filename desc (newest first)."""
-    entries = [_index[k] for k in sorted(_index, reverse=True)]
+    """Atomically write the index sorted by filename desc (newest first).
+
+    Resistance Index is computed here (not in build_index_entry) because it
+    depends on prior same-bag shots — needs the full collection in hand."""
+    entries = list(_index.values())
+    _annotate_resistance_indices(entries)
+    entries.sort(key=lambda e: e.get("file") or "", reverse=True)
     tmp = os.path.join(OUT, INDEX + ".tmp")
     with open(tmp, "w") as f:
         json.dump(entries, f, indent=2)

@@ -329,6 +329,62 @@ def _index_entry(name: str, data: dict) -> dict:
     return entry
 
 
+# --- Puck Resistance Index (mirrors logger.py:compute_resistance_index) ----
+# Composite z-score of dwell + pour − peak_flow vs a rolling window of
+# prior shots from the same bag. Tells the operator if the puck is running
+# more or less resistive than recent history (input to grind decision).
+# Kept in sync with logger.py — different Docker images, can't share code.
+
+import statistics  # noqa: E402
+
+RI_WINDOW = 7
+RI_MIN_PRIORS = 5
+
+
+def _bag_key(meta: dict) -> tuple:
+    if not meta:
+        return ()
+    return (meta.get("bean_brand") or "",
+            meta.get("bean_type") or "",
+            meta.get("roast_date") or "")
+
+
+def _compute_resistance_index(target: dict, priors: list[dict]):
+    td = target.get("dwell_s")
+    tp = target.get("pour_time_s")
+    tk = target.get("peak_flow_g_s")
+    if td is None or tp is None or tk is None:
+        return None
+    def col(k):
+        return [p[k] for p in priors if p.get(k) is not None]
+    d = col("dwell_s"); p = col("pour_time_s"); k = col("peak_flow_g_s")
+    if min(len(d), len(p), len(k)) < RI_MIN_PRIORS:
+        return None
+    try:
+        d_sd, p_sd, k_sd = statistics.stdev(d), statistics.stdev(p), statistics.stdev(k)
+    except statistics.StatisticsError:
+        return None
+    if d_sd == 0 or p_sd == 0 or k_sd == 0:
+        return None
+    zd = (td - statistics.mean(d)) / d_sd
+    zp = (tp - statistics.mean(p)) / p_sd
+    zk = (tk - statistics.mean(k)) / k_sd
+    return (zd + zp - zk) / 3.0
+
+
+def _annotate_resistance_indices(entries: list[dict]) -> None:
+    by_bag: dict[tuple, list[dict]] = {}
+    for e in sorted(entries, key=lambda x: x.get("saved_at") or x.get("file") or ""):
+        key = _bag_key(e.get("metadata") or {})
+        window = (by_bag.get(key) or [])[-RI_WINDOW:]
+        ri = _compute_resistance_index(e, window)
+        if ri is not None:
+            e["resistance_index"] = round(ri, 3)
+        else:
+            e.pop("resistance_index", None)
+        by_bag.setdefault(key, []).append(e)
+
+
 def _rebuild_index() -> None:
     """Full disk scan, write shots/index.json. Cheap at our shot volume."""
     entries = []
@@ -341,6 +397,7 @@ def _rebuild_index() -> None:
         except (OSError, json.JSONDecodeError):
             continue
         entries.append(_index_entry(name, data))
+    _annotate_resistance_indices(entries)
     entries.sort(key=lambda e: e["file"], reverse=True)
     tmp = os.path.join(OUT_DIR, INDEX_NAME + ".tmp")
     with open(tmp, "w") as f: json.dump(entries, f, indent=2)

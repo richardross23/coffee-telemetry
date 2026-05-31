@@ -367,6 +367,34 @@
   .row .meta-line .bag { color: var(--good); font-variant-numeric: tabular-nums; }
   .row .meta-line .channel { color: var(--warn); }
 
+  /* Puck Resistance Index — recommends grind direction (see logger:compute_resistance_index).
+     Three bands: hold / 1-click / 2-click, two directions: finer (low RI) / coarser (high RI). */
+  .row .meta-line .ri {
+    font-variant-numeric: tabular-nums;
+    padding: 1px 6px;
+    border-radius: 8px;
+    border: 1px solid currentColor;
+    background: rgba(255,255,255,0.02);
+  }
+  .row .meta-line .ri.ri-hold    { color: var(--good); }
+  .row .meta-line .ri.ri-finer1  { color: var(--copper); }
+  .row .meta-line .ri.ri-finer2  { color: var(--bad); }
+  .row .meta-line .ri.ri-coarser1 { color: var(--warn); }
+  .row .meta-line .ri.ri-coarser2 { color: var(--bad); }
+
+  /* Header sparkline: last 10 RI values across all bags, oldest left → newest right. */
+  #ri-spark {
+    display: inline-flex; gap: 2px; align-items: flex-end;
+    height: 14px; margin-left: 8px; vertical-align: middle;
+  }
+  #ri-spark .dot {
+    width: 4px; border-radius: 1px; min-height: 2px;
+    background: var(--dim);
+  }
+  #ri-spark .dot.pos { background: var(--warn); }
+  #ri-spark .dot.neg { background: var(--copper); }
+  #ri-spark .dot.big { background: var(--bad); }
+
   /* Edit metadata modal */
   #edit-overlay {
     position: fixed; inset: 0; z-index: 100;
@@ -657,7 +685,7 @@
 
   <aside id="history">
     <div id="history-header">
-      <span>Recent shots</span>
+      <span>Recent shots<span id="ri-spark" title="Puck resistance trend across the last 10 shots — oldest left, newest right. Bars above the centre = puck more resistive (go coarser); below = less resistive (go finer)."></span></span>
       <div class="actions">
         <button id="back-to-live" title="Resume live updates">Live</button>
         <button id="close-history" title="Hide panel" aria-label="Close">×</button>
@@ -1604,7 +1632,24 @@ function bagKey(meta) {
   return parts.every(Boolean) ? parts.join('|') : null;
 }
 
+function renderRISpark(items) {
+  const spark = document.getElementById('ri-spark');
+  if (!spark) return;
+  // items arrive newest-first; reverse so oldest renders left, newest right.
+  const ris = items.slice(0, 10).reverse()
+    .filter(it => typeof it.resistance_index === 'number')
+    .map(it => it.resistance_index);
+  if (!ris.length) { spark.innerHTML = ''; return; }
+  const max = Math.max(2, ...ris.map(Math.abs));   // scale to ±max, floor at 2σ
+  spark.innerHTML = ris.map(ri => {
+    const h = Math.max(2, Math.round(Math.abs(ri) / max * 12));
+    const cls = Math.abs(ri) > 1.5 ? 'big' : (ri > 0 ? 'pos' : (ri < 0 ? 'neg' : ''));
+    return `<span class="dot ${cls}" style="height:${h}px" title="${ri >= 0 ? '+' : ''}${ri.toFixed(2)}σ"></span>`;
+  }).join('');
+}
+
 function renderHistory(items) {
+  renderRISpark(items);
   if (!items.length) {
     historyList.innerHTML = `<div id="history-empty">No shots saved yet</div>`;
     return;
@@ -1649,6 +1694,18 @@ function renderHistory(items) {
     if (it.days_off_roast != null) meta2parts.push(`<span class="roast">${it.days_off_roast}d off roast</span>`);
     if ((it.channeling ?? 0) >= 2) {
       meta2parts.push(`<span class="channel" title="${it.channeling} flow excursions during extraction — possible channeling">~ channel</span>`);
+    }
+    if (typeof it.resistance_index === 'number') {
+      const ri = it.resistance_index;
+      // Bands derived from analysis of 90-shot history (rolling-baseline σ ≈ 1.5).
+      // ±0.5σ acts as the "hold" window; ±1.5σ triggers a stronger recommendation.
+      let cls, lbl, tip;
+      if      (ri >  1.5) { cls = 'ri-coarser2'; lbl = `+${ri.toFixed(1)}σ ⇢ coarser ×2`; tip = 'Puck much more resistive than recent — go 2 clicks coarser'; }
+      else if (ri >  0.5) { cls = 'ri-coarser1'; lbl = `+${ri.toFixed(1)}σ ⇢ coarser`;    tip = 'Puck more resistive than recent — 1 click coarser (confirm next shot)'; }
+      else if (ri < -1.5) { cls = 'ri-finer2';   lbl = `${ri.toFixed(1)}σ ⇠ finer ×2`;    tip = 'Puck much less resistive than recent — go 2 clicks finer'; }
+      else if (ri < -0.5) { cls = 'ri-finer1';   lbl = `${ri.toFixed(1)}σ ⇠ finer`;       tip = 'Puck less resistive than recent — 1 click finer (confirm next shot)'; }
+      else                { cls = 'ri-hold';     lbl = `${ri >= 0 ? '+' : ''}${ri.toFixed(1)}σ hold`; tip = 'Puck operating in normal range — hold grind'; }
+      meta2parts.push(`<span class="ri ${cls}" title="${tip}">${lbl}</span>`);
     }
     const bk = bagKey(it.metadata);
     if (bk && bagCounts[bk] > 1) {
