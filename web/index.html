@@ -368,19 +368,15 @@
   .row .meta-line .channel { color: var(--warn); }
 
   /* Puck Resistance Index — recommends grind direction (see logger:compute_resistance_index).
-     Three bands: hold / 1-click / 2-click, two directions: finer (low RI) / coarser (high RI). */
+     Inline plain text to match the other meta chips. Hold state suppressed
+     (no chip when there's nothing to act on). Tooltip carries the long form. */
   .row .meta-line .ri {
     font-variant-numeric: tabular-nums;
-    padding: 1px 6px;
-    border-radius: 8px;
-    border: 1px solid currentColor;
-    background: rgba(255,255,255,0.02);
+    font-weight: 500;
+    letter-spacing: 0;
   }
-  .row .meta-line .ri.ri-hold    { color: var(--good); }
-  .row .meta-line .ri.ri-finer1  { color: var(--copper); }
-  .row .meta-line .ri.ri-finer2  { color: var(--bad); }
-  .row .meta-line .ri.ri-coarser1 { color: var(--warn); }
-  .row .meta-line .ri.ri-coarser2 { color: var(--bad); }
+  .row .meta-line .ri.ri-act1 { color: var(--warn); }
+  .row .meta-line .ri.ri-act2 { color: var(--bad); }
 
   /* Header sparkline: last 10 RI values across all bags, oldest left → newest right. */
   #ri-spark {
@@ -1699,16 +1695,15 @@ function renderHistory(items) {
     }
     if (typeof it.resistance_index === 'number') {
       const ri = it.resistance_index;
-      // Chip uses the absolute per-bag baseline (this shot vs all other
-      // shots in the same bag). ±0.5σ = hold; ±1.5σ = stronger recommendation.
-      // Sparkline (header) uses the rolling baseline for trend visibility.
-      let cls, lbl, tip;
-      if      (ri >  1.5) { cls = 'ri-coarser2'; lbl = `+${ri.toFixed(1)}σ ⇢ coarser ×2`; tip = 'Puck much more resistive than your normal for this bag — go 2 clicks coarser'; }
-      else if (ri >  0.5) { cls = 'ri-coarser1'; lbl = `+${ri.toFixed(1)}σ ⇢ coarser`;    tip = 'Puck more resistive than your normal for this bag — 1 click coarser (confirm next shot)'; }
-      else if (ri < -1.5) { cls = 'ri-finer2';   lbl = `${ri.toFixed(1)}σ ⇠ finer ×2`;    tip = 'Puck much less resistive than your normal for this bag — go 2 clicks finer'; }
-      else if (ri < -0.5) { cls = 'ri-finer1';   lbl = `${ri.toFixed(1)}σ ⇠ finer`;       tip = 'Puck less resistive than your normal for this bag — 1 click finer (confirm next shot)'; }
-      else                { cls = 'ri-hold';     lbl = `${ri >= 0 ? '+' : ''}${ri.toFixed(1)}σ hold`; tip = 'Puck operating in normal range for this bag — hold grind'; }
-      meta2parts.push(`<span class="ri ${cls}" title="${tip}">${lbl}</span>`);
+      // Chip uses the absolute per-bag baseline. Hold = no chip (cleaner row).
+      // Tooltip carries the full prescription; chip itself just shows direction
+      // + magnitude in σ to match the existing meta-line aesthetic.
+      let cls = null, lbl = '', tip = '';
+      if      (ri >  1.5) { cls = 'ri-act2'; lbl = 'coarser ×2'; tip = `Puck much more resistive than your normal for this bag (RI +${ri.toFixed(1)}σ) — go 2 clicks coarser`; }
+      else if (ri >  0.5) { cls = 'ri-act1'; lbl = 'coarser';    tip = `Puck more resistive than your normal for this bag (RI +${ri.toFixed(1)}σ) — 1 click coarser (confirm next shot)`; }
+      else if (ri < -1.5) { cls = 'ri-act2'; lbl = 'finer ×2';   tip = `Puck much less resistive than your normal for this bag (RI ${ri.toFixed(1)}σ) — go 2 clicks finer`; }
+      else if (ri < -0.5) { cls = 'ri-act1'; lbl = 'finer';      tip = `Puck less resistive than your normal for this bag (RI ${ri.toFixed(1)}σ) — 1 click finer (confirm next shot)`; }
+      if (cls) meta2parts.push(`<span class="ri ${cls}" title="${tip}">${lbl}</span>`);
     }
     const bk = bagKey(it.metadata);
     if (bk && bagCounts[bk] > 1) {
