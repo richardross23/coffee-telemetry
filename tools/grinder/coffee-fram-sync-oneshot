@@ -24,6 +24,10 @@ die() { printf '✗ %s\n' "$*" >&2; exit "${2:-1}"; }
 PRIOR_SSID=$(networksetup -getairportnetwork "$WIFI_IF" 2>/dev/null \
              | sed -n 's/^Current Wi-Fi Network: //p')
 say "prior WiFi: ${PRIOR_SSID:-<none>}"
+# Ensure the radio is ON (prior idle-probe runs might have left it off).
+say "ensuring WiFi power on"
+networksetup -setairportpower "$WIFI_IF" on >/dev/null 2>&1 || true
+sleep 1
 
 restore() {
   if [ -z "$PRIOR_SSID" ] || [ "$PRIOR_SSID" = "$GRINDER_SSID" ]; then
@@ -58,10 +62,5 @@ sleep 2
 
 say "running coffee-fram-sync"
 coffee-fram-sync || die "coffee-fram-sync failed" 3
-
-if [ "${PROBE_DDD:-1}" = "1" ]; then
-  say "running coffee-grinder-probe-ddd (set PROBE_DDD=0 to skip)"
-  coffee-grinder-probe-ddd || say "ddd probe failed (non-fatal)"
-fi
 
 say "sync complete — WiFi will restore on exit"
