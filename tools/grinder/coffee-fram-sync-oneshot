@@ -59,4 +59,9 @@ sleep 2
 say "running coffee-fram-sync"
 coffee-fram-sync || die "coffee-fram-sync failed" 3
 
+if [ "${PROBE_DDD:-1}" = "1" ]; then
+  say "running coffee-grinder-probe-ddd (set PROBE_DDD=0 to skip)"
+  coffee-grinder-probe-ddd || say "ddd probe failed (non-fatal)"
+fi
+
 say "sync complete — WiFi will restore on exit"

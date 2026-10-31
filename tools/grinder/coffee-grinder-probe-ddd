@@ -1,0 +1,111 @@
+#!/usr/bin/env bash
+# coffee-grinder-probe-ddd — snapshot everything the grinder exposes over
+# HTTP during an owner-mode window, so we can later hunt for Disc Distance
+# Detection (DDD) and other sensor fields the FRAM shot-log doesn't carry.
+#
+# Captures:
+#   /                       — SPA shell HTML
+#   /app.js, /chunk-vendors.js, /app.css, /chunk-vendors.css — client code
+#     (grep these later for 'ddd', 'disc', 'distance', 'sensor', 'burr',
+#      and the full set of API routes the UI calls)
+#   /info, /status          — baseline
+#   candidate endpoints     — /sensors, /state, /diagnostics, /settings,
+#                             /ddd, /measurement, /calibration, /burr,
+#                             /debug, /log, /logs
+#
+# Each run writes to a timestamped directory on refuge so repeat runs
+# build a time series without clobbering.
+#
+# Assumes you're already on the grinder's AP. Doesn't disconnect at the
+# end — chain it after coffee-fram-sync for one-touch "pull everything".
+
+set -uo pipefail
+
+GRINDER=${GRINDER:-http://192.168.4.1}
+REFUGE_HOST=${REFUGE_HOST:-refuge}
+STAMP=$(date -u +%Y%m%dT%H%M%SZ)
+REMOTE_DIR=${REMOTE_DIR:-/volume2/docker/coffee/tools/grinder/probes/$STAMP}
+
+LOCAL=$(mktemp -d -t grinder-probe.XXXXXX)
+trap 'rm -rf "$LOCAL"' EXIT
+
+say() { printf '► %s\n' "$*"; }
+
+say "snapshot dir: $REMOTE_DIR"
+
+# --- static assets (SPA shell + bundles) -----------------------------------
+for path in / /app.js /chunk-vendors.js /app.css /chunk-vendors.css /favicon.ico; do
+    base=$(basename "$path")
+    [ "$path" = "/" ] && base="index.html"
+    curl -sS --max-time 15 "${GRINDER}${path}" -o "$LOCAL/$base" \
+         -w "  %{http_code}  ${path}  %{size_download}B\n" 2>&1
+done
+
+# --- known endpoints -------------------------------------------------------
+for path in /info /status; do
+    base=$(echo "$path" | sed 's|/||g').json
+    curl -sS --max-time 15 "${GRINDER}${path}" -o "$LOCAL/$base" \
+         -w "  %{http_code}  ${path}  %{size_download}B\n" 2>&1
+done
+
+# --- candidate endpoints: probe each, keep the response regardless --------
+say "probing candidate endpoints (404 and empty are expected for most)"
+cat > "$LOCAL/candidates.txt" <<'EOF'
+/sensors
+/state
+/diagnostics
+/diag
+/settings
+/config
+/ddd
+/measurement
+/calibration
+/calib
+/burr
+/debug
+/log
+/logs
+/stats
+/statistics
+/grind
+/grinder
+/wifi
+/network
+/time
+/update
+/version
+/motor
+/scale
+EOF
+: > "$LOCAL/candidate_results.txt"
+while read -r path; do
+    code=$(curl -sS --max-time 8 -o "$LOCAL/_tmp" -w "%{http_code}" "${GRINDER}${path}" 2>/dev/null || echo "ERR")
+    size=$(wc -c < "$LOCAL/_tmp" | tr -d ' ')
+    printf '  %-20s HTTP %-5s %s bytes\n' "$path" "$code" "$size" | tee -a "$LOCAL/candidate_results.txt"
+    # Keep non-trivial responses (not 404, not empty)
+    if [ "$code" = "200" ] && [ "$size" -gt 0 ]; then
+        base=$(echo "$path" | sed 's|/||g')
+        cp "$LOCAL/_tmp" "$LOCAL/${base}.response"
+    fi
+done < "$LOCAL/candidates.txt"
+rm -f "$LOCAL/_tmp"
+
+# --- also save a FRAM snapshot for THIS instant (fresh regen) --------------
+say "triggering FRAM regen for a timestamped snapshot alongside the probe"
+curl -sS -X POST "${GRINDER}/stm?framFetch" >/dev/null
+for i in $(seq 1 90); do
+    prog=$(curl -sS --max-time 5 "${GRINDER}/status" \
+           | python3 -c 'import sys,json; print(json.load(sys.stdin).get("framProgress",-1))' 2>/dev/null || echo "-1")
+    [ "$prog" = "100" ] && break
+    sleep 1.5
+done
+curl -sS --max-time 60 "${GRINDER}/fram.bin" -o "$LOCAL/fram.bin"
+say "  fram.bin: $(wc -c < "$LOCAL/fram.bin") bytes"
+
+# --- ship to refuge --------------------------------------------------------
+say "shipping snapshot to ${REFUGE_HOST}:${REMOTE_DIR}"
+ssh "$REFUGE_HOST" "mkdir -p '$REMOTE_DIR'"
+tar cf - -C "$LOCAL" . | ssh "$REFUGE_HOST" "tar xf - -C '$REMOTE_DIR'"
+
+say "done. inventory:"
+ssh "$REFUGE_HOST" "ls -la '$REMOTE_DIR'"
