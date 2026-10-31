@@ -1,0 +1,48 @@
+#!/usr/bin/env bash
+# coffee-fram-sync-oneshot — do the whole FRAM sync in one command.
+# Assumes you've just put the grinder into OWNER MODE (hold both buttons
+# while flipping the rear switch on). Runs quickly enough to beat the
+# ~2-minute no-client AP timeout.
+#
+# Sequence:
+#   1. Remember current WiFi SSID
+#   2. Join grinder AP (password auto-pulled from keychain)
+#   3. Run coffee-fram-sync (pulls fram.bin, scps to refuge, backfills)
+#   4. Restore prior WiFi
+#
+# Total time: ~70 seconds (dominated by the 65s FRAM regen on the grinder).
+# Needs no sudo. Ethernet keeps refuge/internet alive throughout.
+
+set -uo pipefail
+
+WIFI_IF=${WIFI_IF:-en1}
+GRINDER_SSID=${GRINDER_SSID:-E65GbW240216879-240216879}
+
+say() { printf '► %s\n' "$*"; }
+die() { printf '✗ %s\n' "$*" >&2; exit "${2:-1}"; }
+
+PRIOR_SSID=$(networksetup -getairportnetwork "$WIFI_IF" 2>/dev/null \
+             | sed -n 's/^Current Wi-Fi Network: //p')
+say "prior WiFi: ${PRIOR_SSID:-<none>}"
+
+restore() {
+  if [ -z "$PRIOR_SSID" ] || [ "$PRIOR_SSID" = "$GRINDER_SSID" ]; then
+    say "no prior SSID to restore (leaving WiFi as-is)"
+    return
+  fi
+  say "restoring WiFi to '$PRIOR_SSID'"
+  networksetup -setairportnetwork "$WIFI_IF" "$PRIOR_SSID" >/dev/null 2>&1 || true
+}
+trap restore EXIT
+
+say "joining grinder AP: $GRINDER_SSID"
+JOIN=$(networksetup -setairportnetwork "$WIFI_IF" "$GRINDER_SSID" 2>&1 || true)
+if echo "$JOIN" | grep -qi "failed"; then
+  die "could not join grinder AP — is owner mode active? ($JOIN)" 2
+fi
+sleep 2
+
+say "running coffee-fram-sync"
+coffee-fram-sync || die "coffee-fram-sync failed" 3
+
+say "sync complete — WiFi will restore on exit"
