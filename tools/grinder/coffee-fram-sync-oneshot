@@ -32,10 +32,23 @@ say "ensuring WiFi power on"
 networksetup -setairportpower "$WIFI_IF" on >/dev/null 2>&1 || true
 sleep 1
 
+# Capture starting SSID so restore() can tell the difference between
+# "script joined the grinder" (cycle WiFi on exit so Mac rejoins home)
+# and "user manually joined the grinder before running this" (leave it
+# alone — the user is debugging and wants to stay on the AP).
+INITIAL_SSID=$(networksetup -getairportnetwork "$WIFI_IF" 2>/dev/null \
+               | sed -n 's/^Current Wi-Fi Network: //p')
+
 # On exit (any path), cycle WiFi off then on. macOS will auto-rejoin the
 # preferred home network — more reliable than the old PRIOR_SSID approach,
-# which failed when the Mac wasn't associated at script start.
+# which failed when the Mac wasn't associated at script start. Skip the
+# cycle if we were already on the grinder AP at start: user set that up
+# deliberately and wants to stay there.
 restore() {
+  if [ "$INITIAL_SSID" = "$GRINDER_SSID" ]; then
+    say "started on grinder AP — leaving WiFi as-is"
+    return
+  fi
   say "cycling WiFi so Mac rejoins its usual network"
   networksetup -setairportpower "$WIFI_IF" off >/dev/null 2>&1 || true
   sleep 2
