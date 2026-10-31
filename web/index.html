@@ -250,6 +250,7 @@
   #shotinfo .bean { color: var(--fg); }
   #shotinfo .dose { color: var(--copper-bright); font-variant-numeric: tabular-nums; font-weight: 500; }
   #shotinfo .grind { color: var(--cream); font-variant-numeric: tabular-nums; }
+  .dose-delta { color: var(--muted); font-size: 0.85em; font-weight: 400; margin-left: 2px; }
   #shotinfo .roast { color: var(--dim); }
   #shotinfo .sep { color: var(--line-bright); }
   /* Desktop: bean primary + secondary inline, separator between. */
@@ -702,7 +703,7 @@
         <div class="field"><label for="ed-bean-type">Bean</label><input id="ed-bean-type" name="bean_type" placeholder="e.g. Ethiopia Yirgacheffe"></div>
         <div class="field"><label for="ed-roast-date">Roasted</label><input id="ed-roast-date" name="roast_date" type="date"></div>
         <div class="field"><label for="ed-roast-level">Roast level</label><input id="ed-roast-level" name="roast_level" placeholder="light / medium / dark"></div>
-        <div class="field"><label for="ed-bean-weight">Dose (g)</label><input id="ed-bean-weight" name="bean_weight_g" type="number" step="0.01" min="0" placeholder="18.00"></div>
+        <div class="field"><label for="ed-ground-weight">Dose (g)</label><input id="ed-ground-weight" name="ground_weight_g" type="number" step="0.01" min="0" placeholder="20.00"></div>
       </fieldset>
       <fieldset>
         <legend>Grinder</legend>
@@ -1429,13 +1430,21 @@ function setShotInfo(meta, savedAtIso) {
   }
   if (meta.roast_level) beanSecondary.push(`<span class="roast">${escapeHtml(meta.roast_level)}</span>`);
 
-  // Grinder group: dose · grind duration · setting
+  // Grinder group: dose · grind duration · setting. Dose shows ground_weight_g
+  // (grinder-reported actual) when present, else bean_weight_g (target).
+  // Variance against bean_weight_g target shown as a dim suffix when both exist.
   const grindParts = [];
-  const dose = meta.ground_weight_g ?? meta.bean_weight_g;
+  const groundWt = meta.ground_weight_g;
+  const targetWt = meta.bean_weight_g;
+  const dose = groundWt ?? targetWt;
   if (dose != null) {
-    const fromGrinder = meta.ground_weight_g != null;
-    const label = fromGrinder ? 'g ground' : 'g dose';
-    grindParts.push(`<span class="dose">${(+dose).toFixed(fromGrinder ? 2 : 1)}${label}</span>`);
+    const fromGrinder = groundWt != null;
+    let txt = `${(+dose).toFixed(fromGrinder ? 2 : 1)}g`;
+    if (fromGrinder && targetWt != null) {
+      const d = groundWt - targetWt;
+      if (Math.abs(d) >= 0.01) txt += ` <span class="dose-delta">${d >= 0 ? '+' : ''}${d.toFixed(2)}</span>`;
+    }
+    grindParts.push(`<span class="dose">${txt}</span>`);
   }
   if (meta.grind_duration_s != null) {
     grindParts.push(`<span class="grind">${(+meta.grind_duration_s).toFixed(2)}s grind</span>`);
@@ -1581,7 +1590,8 @@ client.on('message', (topic, msg) => {
     flowLabel.textContent = 'avg';
     setFlow(avg);
     // Brew ratio uses sticky dose so it shows immediately on shot end.
-    const dose = parseFloat(loadSticky().bean_weight_g);
+    const sticky = loadSticky();
+    const dose = parseFloat(sticky.ground_weight_g ?? sticky.bean_weight_g);
     const ratioStr = (Number.isFinite(dose) && dose > 0 && p.final_weight_g)
       ? `1:${(p.final_weight_g / dose).toFixed(2)}` : null;
     showStats({
@@ -1683,12 +1693,19 @@ function renderHistory(items) {
     const meta2parts = [];
     if (it.bean_label) meta2parts.push(`<span>${escapeHtml(it.bean_label)}</span>`);
     if (it.brew_ratio_str) meta2parts.push(`<span class="ratio">${it.brew_ratio_str}</span>`);
-    // Prefer ground_weight_g (from grinder log) for the row's dose chip.
-    const rowDose = it.metadata?.ground_weight_g ?? it.metadata?.bean_weight_g;
+    // Prefer ground_weight_g (grinder-reported) for the row's dose chip,
+    // with variance vs bean_weight_g target when both exist.
+    const rGround = it.metadata?.ground_weight_g;
+    const rTarget = it.metadata?.bean_weight_g;
+    const rowDose = rGround ?? rTarget;
     if (rowDose != null) {
-      const fromGrinder = it.metadata?.ground_weight_g != null;
-      const lbl = fromGrinder ? 'g ground' : 'g';
-      meta2parts.push(`<span class="grind">${(+rowDose).toFixed(fromGrinder ? 2 : 1)}${lbl}</span>`);
+      const fromGrinder = rGround != null;
+      let txt = `${(+rowDose).toFixed(fromGrinder ? 2 : 1)}g`;
+      if (fromGrinder && rTarget != null) {
+        const d = rGround - rTarget;
+        if (Math.abs(d) >= 0.01) txt += ` <span class="dose-delta">${d >= 0 ? '+' : ''}${d.toFixed(2)}</span>`;
+      }
+      meta2parts.push(`<span class="grind">${txt}</span>`);
     }
     if (it.metadata?.grinder_setting) meta2parts.push(`<span class="grind">${escapeHtml(it.metadata.grinder_setting)}</span>`);
     if (it.days_off_roast != null) meta2parts.push(`<span class="roast">${it.days_off_roast}d off roast</span>`);
@@ -1867,7 +1884,7 @@ async function exportDecent(file) {
 // Bean / grinder / dose / notes per shot, published over MQTT. The
 // bean/grinder fields persist in localStorage so the form pre-fills.
 const STICKY_KEY = 'coffee-telemetry/sticky-metadata';
-const STICKY_FIELDS = ['bean_brand','bean_type','roast_date','roast_level','bean_weight_g','grinder_model','grinder_setting'];
+const STICKY_FIELDS = ['bean_brand','bean_type','roast_date','roast_level','ground_weight_g','bean_weight_g','grinder_model','grinder_setting'];
 const editOverlay = $('edit-overlay');
 const editForm = $('edit-form');
 const editShotWhen = $('edit-shot-when');
@@ -1920,11 +1937,12 @@ async function openEdit(file) {
     fill('ed-bean-type', 'bean_type');
     fill('ed-roast-date', 'roast_date');
     fill('ed-roast-level', 'roast_level');
-    // Dose field: prefer the grinder-imported ground_weight_g (2-decimal
-    // precision) over the user's target bean_weight_g, so the imported
-    // number shows up in the editor instead of the sticky target dose.
-    $('ed-bean-weight').value =
-      existing.ground_weight_g ?? existing.bean_weight_g ?? sticky.bean_weight_g ?? '';
+    // Dose field — ground_weight_g is the canonical dose going forward
+    // (grinder-imported or manually entered). Fall through to legacy
+    // bean_weight_g (old shots) and both sticky slots for first-run.
+    $('ed-ground-weight').value =
+      existing.ground_weight_g ?? existing.bean_weight_g
+      ?? sticky.ground_weight_g ?? sticky.bean_weight_g ?? '';
     fill('ed-grinder-model', 'grinder_model');
     fill('ed-grinder-setting', 'grinder_setting');
     fill('ed-notes', 'notes');
@@ -1957,7 +1975,7 @@ editForm.addEventListener('submit', (e) => {
   for (const [k, v] of fd.entries()) {
     const trimmed = String(v).trim();
     if (!trimmed) continue;
-    if (k === 'bean_weight_g') {
+    if (k === 'ground_weight_g') {
       const n = parseFloat(trimmed);
       if (Number.isFinite(n)) metadata[k] = n;
     } else if (k === 'enjoyment') {
@@ -2051,7 +2069,7 @@ async function replayShot(file) {
     flowLabel.textContent = 'avg';
     setFlow(avg);
     if (shot.tank_pct_at_start != null) tankV.textContent = Math.round(shot.tank_pct_at_start);
-    const dose = parseFloat(shot.metadata?.bean_weight_g);
+    const dose = parseFloat(shot.metadata?.ground_weight_g ?? shot.metadata?.bean_weight_g);
     const ratioStr = (Number.isFinite(dose) && dose > 0 && shot.final_weight_g)
       ? `1:${(shot.final_weight_g / dose).toFixed(2)}` : null;
     showStats({
