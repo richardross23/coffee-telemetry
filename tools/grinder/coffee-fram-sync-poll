@@ -1,0 +1,85 @@
+#!/usr/bin/env bash
+# coffee-fram-sync-poll — launchd-fired watcher that joins the grinder's
+# diagnostic AP when it's up, runs the FRAM sync, and restores the Mac's
+# previous WiFi state. No-op when the grinder AP isn't broadcasting.
+#
+# No sudo required: networksetup -setairportnetwork runs as the user and
+# pulls the WiFi password from the login keychain for already-known
+# networks.
+
+set -euo pipefail
+
+WIFI_IF=${WIFI_IF:-en1}
+GRINDER_SSID=${GRINDER_SSID:-E65GbW240216879-240216879}
+GRINDER_IP=${GRINDER_IP:-192.168.4.1}
+DEBOUNCE_HOURS=${DEBOUNCE_HOURS:-12}
+
+STATE_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/coffee-fram-sync"
+LAST_SUCCESS="$STATE_DIR/last-success"
+LAST_LOG="$STATE_DIR/last-run.log"
+mkdir -p "$STATE_DIR"
+
+log() { printf '[%s] %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$*"; }
+
+exec > >(tee -a "$LAST_LOG") 2>&1
+
+log "poll started"
+
+# --- 1. debounce -------------------------------------------------------------
+if [ -f "$LAST_SUCCESS" ]; then
+  AGE_H=$(( ( $(date +%s) - $(stat -f %m "$LAST_SUCCESS") ) / 3600 ))
+  if [ "$AGE_H" -lt "$DEBOUNCE_HOURS" ]; then
+    log "debounced (last success ${AGE_H}h ago, threshold ${DEBOUNCE_HOURS}h) — exit"
+    exit 0
+  fi
+fi
+
+# --- 2. save prior WiFi state -----------------------------------------------
+PRIOR_SSID=$(networksetup -getairportnetwork "$WIFI_IF" 2>/dev/null \
+             | sed -n 's/^Current Wi-Fi Network: //p')
+log "prior SSID: ${PRIOR_SSID:-<none>}"
+
+restore_wifi() {
+  if [ -z "$PRIOR_SSID" ] || [ "$PRIOR_SSID" = "$GRINDER_SSID" ]; then
+    log "no prior SSID to restore"
+    return
+  fi
+  log "restoring WiFi to '$PRIOR_SSID'"
+  # networksetup exit code is unreliable; result observable via -getairportnetwork
+  networksetup -setairportnetwork "$WIFI_IF" "$PRIOR_SSID" 2>&1 | sed 's/^/  /'
+}
+trap restore_wifi EXIT
+
+# --- 3. attempt to join grinder AP -------------------------------------------
+if [ "$PRIOR_SSID" = "$GRINDER_SSID" ]; then
+  log "already on grinder AP"
+else
+  log "attempting join: $GRINDER_SSID"
+  JOIN_OUT=$(networksetup -setairportnetwork "$WIFI_IF" "$GRINDER_SSID" 2>&1 || true)
+  echo "$JOIN_OUT" | sed 's/^/  /'
+  if echo "$JOIN_OUT" | grep -qi "failed"; then
+    log "grinder AP not available — exit (no-op)"
+    exit 0
+  fi
+  # give association a moment to settle
+  sleep 3
+fi
+
+# --- 4. verify reachability -------------------------------------------------
+if ! ping -c 2 -t 3 -q "$GRINDER_IP" >/dev/null 2>&1; then
+  log "joined but $GRINDER_IP not pingable — exit"
+  exit 1
+fi
+log "grinder reachable at $GRINDER_IP"
+
+# --- 5. run the sync --------------------------------------------------------
+log "invoking coffee-fram-sync"
+if coffee-fram-sync; then
+  log "sync succeeded"
+  touch "$LAST_SUCCESS"
+else
+  log "sync failed (exit $?)"
+  exit 1
+fi
+
+log "poll finished"

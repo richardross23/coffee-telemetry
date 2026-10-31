@@ -1,0 +1,81 @@
+#!/usr/bin/env bash
+# coffee-fram-sync — pull the Mahlkönig E65S GBW's FRAM dump from its
+# diagnostic AP and push it to refuge for backfill against the espresso
+# shot archive.
+#
+# Preconditions:
+#   1. Grinder is powered on in OWNER mode (hold both upper/lower buttons
+#      during power-on). Normal power-on does not activate the WiFi AP.
+#   2. This Mac's WiFi (en1) is associated with the grinder's SSID. The
+#      Mac stays on main LAN via ethernet (en0), so refuge access over
+#      ssh/scp continues working while WiFi handles the grinder.
+#
+# After successful run, the dashboard chips on each matched shot will
+# show "19.78g ground" / "5.38s grind" instead of the plain dose label.
+
+set -euo pipefail
+
+GRINDER=${GRINDER:-http://192.168.4.1}
+REFUGE_HOST=${REFUGE_HOST:-refuge}
+REMOTE_PATH=${REMOTE_PATH:-/tmp/fram.bin}
+REMOTE_SCRIPT=${REMOTE_SCRIPT:-/volume2/docker/coffee/tools/grinder/backfill.py}
+
+LOCAL_TMP=$(mktemp -t fram.XXXXXX)
+trap 'rm -f "$LOCAL_TMP"' EXIT
+
+say() { printf '%s\n' "$*" >&2; }
+
+# --- 1. verify grinder reachable ---------------------------------------------
+say "► checking grinder at $GRINDER"
+if ! INFO=$(curl -sS --max-time 5 "$GRINDER/info" 2>&1); then
+  say "  grinder not reachable."
+  say "  hint: is it on in OWNER mode (hold both buttons while powering on)?"
+  say "        is this Mac's WiFi joined to the grinder's SSID?"
+  exit 1
+fi
+MODEL=$(printf '%s' "$INFO" | python3 -c 'import sys,json; print(json.load(sys.stdin).get("machineType",""))')
+SERIAL=$(printf '%s' "$INFO" | python3 -c 'import sys,json; print(json.load(sys.stdin).get("serial",""))')
+say "  $MODEL serial $SERIAL"
+
+# --- 2. trigger FRAM regen ---------------------------------------------------
+say "► POST /stm?framFetch"
+curl -sS --max-time 10 -X POST "$GRINDER/stm?framFetch" >/dev/null
+
+# --- 3. poll /status until framProgress == 100 -------------------------------
+say "► waiting for framProgress=100 (expect ~65s)…"
+DEADLINE=$(( $(date +%s) + 120 ))
+LAST=-1
+while [ "$(date +%s)" -lt "$DEADLINE" ]; do
+  PROG=$(curl -sS --max-time 5 "$GRINDER/status" \
+         | python3 -c 'import sys,json; print(json.load(sys.stdin).get("framProgress",-1))' 2>/dev/null || echo -1)
+  if [ "$PROG" != "$LAST" ] && [ $((PROG % 20)) -eq 0 ]; then
+    say "  framProgress=$PROG%"
+    LAST=$PROG
+  fi
+  [ "$PROG" = "100" ] && break
+  sleep 1.5
+done
+if [ "$PROG" != "100" ]; then
+  say "  timed out waiting for FRAM regen (last progress=$PROG)"
+  exit 2
+fi
+
+# --- 4. download /fram.bin ---------------------------------------------------
+say "► downloading /fram.bin"
+curl -sS --max-time 60 "$GRINDER/fram.bin" -o "$LOCAL_TMP"
+SIZE=$(wc -c < "$LOCAL_TMP")
+# Guard against the 34-byte "fram fetching..." placeholder returned mid-regen
+if [ "$SIZE" -lt 10000 ]; then
+  say "  download looks truncated ($SIZE bytes). The grinder may have been"
+  say "  mid-regen. Re-run; if it persists, there's a server quirk."
+  exit 3
+fi
+say "  $SIZE bytes"
+
+# --- 5. ship to refuge and invoke backfill -----------------------------------
+say "► scp → $REFUGE_HOST:$REMOTE_PATH"
+scp -O -q "$LOCAL_TMP" "$REFUGE_HOST:$REMOTE_PATH"
+say "► ssh $REFUGE_HOST python3 $REMOTE_SCRIPT --fram-bin $REMOTE_PATH"
+ssh "$REFUGE_HOST" python3 "$REMOTE_SCRIPT" --fram-bin "$REMOTE_PATH"
+
+say "► done. Hard-reload the dashboard to see fresh backfill."
