@@ -35,11 +35,25 @@ restore() {
 }
 trap restore EXIT
 
-say "joining grinder AP: $GRINDER_SSID"
-JOIN=$(networksetup -setairportnetwork "$WIFI_IF" "$GRINDER_SSID" 2>&1 || true)
-if echo "$JOIN" | grep -qi "failed"; then
-  die "could not join grinder AP — is owner mode active? ($JOIN)" 2
+say "joining grinder AP: $GRINDER_SSID (waiting up to ${JOIN_TIMEOUT_SEC:-90}s for owner mode)"
+JOIN_TIMEOUT_SEC=${JOIN_TIMEOUT_SEC:-90}
+JOIN_INTERVAL_SEC=${JOIN_INTERVAL_SEC:-5}
+START=$(date +%s)
+JOINED=""
+while [ $(( $(date +%s) - START )) -lt "$JOIN_TIMEOUT_SEC" ]; do
+  JOIN=$(networksetup -setairportnetwork "$WIFI_IF" "$GRINDER_SSID" 2>&1 || true)
+  if ! echo "$JOIN" | grep -qi "failed"; then
+    JOINED=1
+    break
+  fi
+  elapsed=$(( $(date +%s) - START ))
+  say "  AP not visible yet (${elapsed}s elapsed) — retrying in ${JOIN_INTERVAL_SEC}s"
+  sleep "$JOIN_INTERVAL_SEC"
+done
+if [ -z "$JOINED" ]; then
+  die "AP never appeared within ${JOIN_TIMEOUT_SEC}s — owner mode may not be active" 2
 fi
+say "joined after $(( $(date +%s) - START ))s"
 sleep 2
 
 say "running coffee-fram-sync"
