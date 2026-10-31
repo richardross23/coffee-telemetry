@@ -5,15 +5,21 @@
 # ~2-minute no-client AP timeout.
 #
 # Sequence:
-#   1. Remember current WiFi SSID
-#   2. Join grinder AP (password auto-pulled from keychain)
-#   3. Run coffee-fram-sync (pulls fram.bin, scps to refuge, backfills)
-#   4. Restore prior WiFi
+#   1. Join grinder AP (password auto-pulled from keychain)
+#   2. Run coffee-fram-sync (pulls fram.bin, scps to refuge, backfills)
+#   3. Cycle WiFi so Mac rejoins its usual network
 #
 # Total time: ~70 seconds (dominated by the 65s FRAM regen on the grinder).
 # Needs no sudo. Ethernet keeps refuge/internet alive throughout.
+#
+# Invoked from the iOS Shortcut via SSH as well as from the Mac terminal.
 
 set -uo pipefail
+
+# Ensure ~/.local/bin is on PATH when invoked from a non-interactive shell
+# (e.g. SSH exec from the iOS Shortcut) where .zshrc isn't sourced.
+PATH="$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"
+export PATH
 
 WIFI_IF=${WIFI_IF:-en1}
 GRINDER_SSID=${GRINDER_SSID:-E65GbW240216879-240216879}
@@ -21,21 +27,19 @@ GRINDER_SSID=${GRINDER_SSID:-E65GbW240216879-240216879}
 say() { printf '► %s\n' "$*"; }
 die() { printf '✗ %s\n' "$*" >&2; exit "${2:-1}"; }
 
-PRIOR_SSID=$(networksetup -getairportnetwork "$WIFI_IF" 2>/dev/null \
-             | sed -n 's/^Current Wi-Fi Network: //p')
-say "prior WiFi: ${PRIOR_SSID:-<none>}"
-# Ensure the radio is ON (prior idle-probe runs might have left it off).
+# Ensure the radio is on — a prior idle-probe might have left it off.
 say "ensuring WiFi power on"
 networksetup -setairportpower "$WIFI_IF" on >/dev/null 2>&1 || true
 sleep 1
 
+# On exit (any path), cycle WiFi off then on. macOS will auto-rejoin the
+# preferred home network — more reliable than the old PRIOR_SSID approach,
+# which failed when the Mac wasn't associated at script start.
 restore() {
-  if [ -z "$PRIOR_SSID" ] || [ "$PRIOR_SSID" = "$GRINDER_SSID" ]; then
-    say "no prior SSID to restore (leaving WiFi as-is)"
-    return
-  fi
-  say "restoring WiFi to '$PRIOR_SSID'"
-  networksetup -setairportnetwork "$WIFI_IF" "$PRIOR_SSID" >/dev/null 2>&1 || true
+  say "cycling WiFi so Mac rejoins its usual network"
+  networksetup -setairportpower "$WIFI_IF" off >/dev/null 2>&1 || true
+  sleep 2
+  networksetup -setairportpower "$WIFI_IF" on >/dev/null 2>&1 || true
 }
 trap restore EXIT
 

@@ -26,9 +26,19 @@ trap 'rm -f "$LOCAL_TMP"' EXIT
 say() { printf '%s\n' "$*" >&2; }
 
 # --- 1. verify grinder reachable ---------------------------------------------
-say "► checking grinder at $GRINDER"
-if ! INFO=$(curl -sS --max-time 5 "$GRINDER/info" 2>&1); then
-  say "  grinder not reachable."
+# Retry for ~20s: when invoked right after a WiFi join (iOS Shortcut flow),
+# DHCP on en1 may not have settled before the first curl. A single-shot check
+# would fail here even though the grinder is actually up.
+say "► checking grinder at $GRINDER (up to 20s)"
+INFO=""
+for attempt in 1 2 3 4 5 6 7 8 9 10; do
+  if INFO=$(curl -sS --max-time 3 "$GRINDER/info" 2>&1); then
+    break
+  fi
+  sleep 2
+done
+if [ -z "$INFO" ] || ! echo "$INFO" | grep -q machineType; then
+  say "  grinder not reachable after retries."
   say "  hint: is it on in OWNER mode (hold both buttons while powering on)?"
   say "        is this Mac's WiFi joined to the grinder's SSID?"
   exit 1
@@ -61,13 +71,22 @@ if [ "$PROG" != "100" ]; then
 fi
 
 # --- 4. download /fram.bin ---------------------------------------------------
-say "► downloading /fram.bin"
-curl -sS --max-time 60 "$GRINDER/fram.bin" -o "$LOCAL_TMP"
-SIZE=$(wc -c < "$LOCAL_TMP")
-# Guard against the 34-byte "fram fetching..." placeholder returned mid-regen
+# Retry a few times: even after framProgress=100, the first GET sometimes
+# returns the 35-byte "fram fetching..." placeholder (observed empirically).
+say "► downloading /fram.bin (up to 3 attempts)"
+SIZE=0
+for attempt in 1 2 3; do
+  curl -sS --max-time 60 "$GRINDER/fram.bin" -o "$LOCAL_TMP"
+  SIZE=$(wc -c < "$LOCAL_TMP" | tr -d ' ')
+  if [ "$SIZE" -ge 10000 ]; then
+    break
+  fi
+  say "  attempt $attempt: $SIZE bytes (placeholder) — retrying in 3s"
+  sleep 3
+done
 if [ "$SIZE" -lt 10000 ]; then
-  say "  download looks truncated ($SIZE bytes). The grinder may have been"
-  say "  mid-regen. Re-run; if it persists, there's a server quirk."
+  say "  download still looks truncated after 3 attempts ($SIZE bytes)."
+  say "  grinder may have a persistent server quirk; try power-cycling it."
   exit 3
 fi
 say "  $SIZE bytes"
