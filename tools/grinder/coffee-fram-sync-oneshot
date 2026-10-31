@@ -56,6 +56,21 @@ restore() {
 }
 trap restore EXIT
 
+# Flush WiFi scan cache before the join loop. Without this, when the
+# oneshot runs via SSH from the Shortcut, `networksetup -setairportnetwork`
+# fails with Error -3900 (tmpErr: network not found in scan cache) on
+# the first several attempts — the cache can hold stale results for
+# ~minutes. A power-cycle forces a fresh scan that reliably picks up
+# the grinder AP. Skip when the user is already on the grinder (we'd
+# just evict ourselves).
+if [ "$INITIAL_SSID" != "$GRINDER_SSID" ]; then
+  say "flushing WiFi scan cache (off/on, ~5s) so grinder AP is visible"
+  networksetup -setairportpower "$WIFI_IF" off >/dev/null 2>&1 || true
+  sleep 2
+  networksetup -setairportpower "$WIFI_IF" on >/dev/null 2>&1 || true
+  sleep 3  # let the fresh scan populate before -setairportnetwork
+fi
+
 say "joining grinder AP: $GRINDER_SSID (waiting up to ${JOIN_TIMEOUT_SEC:-90}s for owner mode)"
 JOIN_TIMEOUT_SEC=${JOIN_TIMEOUT_SEC:-90}
 JOIN_INTERVAL_SEC=${JOIN_INTERVAL_SEC:-5}
