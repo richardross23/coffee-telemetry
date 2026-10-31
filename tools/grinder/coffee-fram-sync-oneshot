@@ -33,26 +33,49 @@ networksetup -setairportpower "$WIFI_IF" on >/dev/null 2>&1 || true
 sleep 1
 
 # Capture starting SSID so restore() can tell the difference between
-# "script joined the grinder" (cycle WiFi on exit so Mac rejoins home)
+# "script joined the grinder" (actively rejoin home on exit)
 # and "user manually joined the grinder before running this" (leave it
 # alone — the user is debugging and wants to stay on the AP).
 INITIAL_SSID=$(networksetup -getairportnetwork "$WIFI_IF" 2>/dev/null \
                | sed -n 's/^Current Wi-Fi Network: //p')
 
-# On exit (any path), cycle WiFi off then on. macOS will auto-rejoin the
-# preferred home network — more reliable than the old PRIOR_SSID approach,
-# which failed when the Mac wasn't associated at script start. Skip the
-# cycle if we were already on the grinder AP at start: user set that up
-# deliberately and wants to stay there.
+# Fallback home SSID if we weren't associated at start: the first entry
+# in the preferred-networks list. macOS orders that list by priority,
+# so the top one is the strongest "please rejoin this" preference.
+HOME_SSID_FALLBACK=$(networksetup -listpreferredwirelessnetworks "$WIFI_IF" 2>/dev/null \
+                     | sed -n '2p' | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')
+
+# Restore sequence on exit — actively drive the rejoin instead of trusting
+# macOS to auto-reassociate. We've observed `off → 2s → on` leaving the
+# Mac unassociated for minutes: scan cache stays empty after programmatic
+# WiFi manipulation. The fix is to re-flush, let the scan populate, then
+# explicitly `-setairportnetwork` to home with retries until it sticks.
+# Skip entirely when the user started on the grinder (debugging path).
 restore() {
   if [ "$INITIAL_SSID" = "$GRINDER_SSID" ]; then
     say "started on grinder AP — leaving WiFi as-is"
     return
   fi
-  say "cycling WiFi so Mac rejoins its usual network"
+  local target="${INITIAL_SSID:-$HOME_SSID_FALLBACK}"
+  say "restoring WiFi (target: ${target:-<none, will cycle and hope>})"
   networksetup -setairportpower "$WIFI_IF" off >/dev/null 2>&1 || true
-  sleep 2
+  sleep 3
   networksetup -setairportpower "$WIFI_IF" on >/dev/null 2>&1 || true
+  sleep 5  # let fresh scan populate before -setairportnetwork
+  if [ -z "$target" ]; then
+    say "no home SSID known — macOS will pick a preferred network on its own"
+    return
+  fi
+  local waits="3 5 8 13 21"  # ~50s total, Fibonacci-ish
+  for w in $waits; do
+    JOIN=$(networksetup -setairportnetwork "$WIFI_IF" "$target" 2>&1 || true)
+    if ! echo "$JOIN" | grep -qi "failed"; then
+      say "rejoined $target"
+      return
+    fi
+    sleep "$w"
+  done
+  say "could not rejoin $target after ~50s — click the WiFi menu bar icon to pick it manually"
 }
 trap restore EXIT
 
