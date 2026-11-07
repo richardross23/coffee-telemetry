@@ -1,5 +1,11 @@
 # DDD investigation — closed
 
+> **Update 2026-11-08:** solved a different way. Patched grinder firmware
+> (`firmware/GRINDER-FIRMWARE-PATCH.md`) writes disc distance into each
+> weight-based FRAM shot record, and `backfill.py` copies it into
+> `grinder_setting` (µm). The conclusion below still holds for stock
+> firmware and the WiFi module.
+
 The Mahlkönig E65S GBW markets Disc Distance Detection (DDD). We looked
 at whether the WiFi diagnostic module exposes it so we could backfill
 per-shot grind-position into the espresso archive alongside dose and

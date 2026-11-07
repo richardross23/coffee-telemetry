@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """Match a Mahlkönig E65S GBW FRAM dump against the espresso shot archive
 and backfill `ground_weight_g` + `grind_duration_s` into each matched shot.
+Where the grinder recorded a disc distance (patched firmware, see
+GRINDER-FIRMWARE-PATCH.md) it also sets `grinder_setting` to that value in µm.
 
 Assumptions baked in from empirical probing of this specific grinder (fw 3.0,
 serial 240216879):
@@ -70,6 +72,9 @@ def parse_fram(path: Path) -> list[dict]:
         target = struct.unpack("<H", rec[9:11])[0] / 100.0
         actual = struct.unpack("<H", rec[13:15])[0] / 100.0
         grind_ms = struct.unpack("<H", rec[21:23])[0]
+        # Patched firmware (2026-11-07) stores disc distance in µm here;
+        # 0 = not recorded (stock firmware, or pre-patch record).
+        ddd_um = struct.unpack("<i", rec[17:21])[0] or None
         if not (VALID_TARGET_G[0] <= target <= VALID_TARGET_G[1]):
             continue
         if abs(actual - target) > VALID_DELTA_G:
@@ -83,6 +88,7 @@ def parse_fram(path: Path) -> list[dict]:
             "target_g": round(target, 2),
             "grind_s": round(grind_ms / 1000.0, 3),
             "raw_ts": ts,
+            "ddd_um": ddd_um,
         })
     return sorted(records, key=lambda r: r["utc"])
 
@@ -152,6 +158,10 @@ def apply_backfill(matches: list[tuple[dict, dict, int]], dry_run: bool) -> tupl
             "grinder_raw_ts": grind["raw_ts"],
             "grinder_match_gap_s": gap_s,
         }
+        if grind["ddd_um"] is not None:
+            # Measured disc distance replaces the hand-entered sticky value
+            # (same unit: µm, as the Grind Change Shortcut records it).
+            new_vals["grinder_setting"] = grind["ddd_um"]
         # Drop legacy field names from previous iterations
         for legacy in ("grinder_dose_g", "grinder_grind_ms", "grinder_target_g"):
             meta.pop(legacy, None)
