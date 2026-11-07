@@ -6,13 +6,38 @@
 
 from __future__ import annotations
 
+import datetime
 import unittest
 from pathlib import Path
 
-from backfill import apply_backfill, parse_fram
+from backfill import apply_backfill, match, parse_fram
 from test_decode_fram import fram, record
 
 TS = 1_794_125_321  # 2026-11-08 08:08:41 grinder wall clock
+UTC = datetime.timezone.utc
+
+
+def local(day: int, hhmm: str) -> datetime.datetime:
+    h, m = map(int, hhmm.split(":"))
+    return datetime.datetime(2026, 11, day, h, m)
+
+
+def shot_at(day: int, hhmm: str) -> dict:
+    """Shot whose pump turned on at this Melbourne (AEDT, UTC+11) time."""
+    t = local(day, hhmm) - datetime.timedelta(hours=11)
+    return {"file": f"{day}@{hhmm}", "pump_on_utc": t.replace(tzinfo=UTC),
+            "data": {"metadata": {}}}
+
+
+def grind_at(day: int, hhmm: str) -> dict:
+    """Grind whose grinder clock read this; parse_fram reads it as AEST."""
+    t = local(day, hhmm) - datetime.timedelta(hours=10)
+    return {"utc": t.replace(tzinfo=UTC), "label": f"{day}@{hhmm}",
+            "actual_g": 20.0, "grind_s": 5.5, "raw_ts": 0, "ddd_um": None}
+
+
+def pairs(matches) -> set[tuple[str, str]]:
+    return {(s["file"], g["label"]) for s, g, _ in matches}
 
 
 def shot(grinder_setting=150) -> dict:
@@ -45,6 +70,41 @@ class ApplyBackfillTest(unittest.TestCase):
         s = shot(grinder_setting=150)
         apply_backfill([(s, grind(None), -60)], dry_run=True)
         self.assertEqual(s["data"]["metadata"]["grinder_setting"], 150)
+
+    def test_unmatched_shot_loses_backfilled_values(self):
+        s = shot()
+        s["data"]["metadata"].update(ground_weight_g=20.28, grind_duration_s=5.5,
+                                     grinder_raw_ts=TS, grinder_match_gap_s=-3780,
+                                     bean_weight_g=20)
+        apply_backfill([], dry_run=True, unmatched=[s])
+        self.assertEqual(s["data"]["metadata"],
+                         {"grinder_setting": 150, "bean_weight_g": 20})
+
+    def test_unmatched_shot_keeps_typed_dose(self):
+        # No grinder_raw_ts: backfill never wrote this dose, so it stays.
+        s = shot()
+        s["data"]["metadata"]["ground_weight_g"] = 19.5
+        apply_backfill([], dry_run=True, unmatched=[s])
+        self.assertEqual(s["data"]["metadata"]["ground_weight_g"], 19.5)
+
+
+class MatchTest(unittest.TestCase):
+    def test_skipped_grind_leaves_its_shot_unmatched(self):
+        # 2026-11-04: the 08:02 grind logged 0 g (dropped by parse_fram), and
+        # the grinder clock is on daylight time. Each shot must keep its own
+        # grind instead of taking the next one.
+        shots = [shot_at(4, "08:04"), shot_at(4, "08:09"), shot_at(4, "09:00")]
+        grinds = [grind_at(4, "08:07"), grind_at(4, "08:58")]
+        self.assertEqual(pairs(match(shots, grinds)),
+                         {("4@08:09", "4@08:07"), ("4@09:00", "4@08:58")})
+
+    def test_single_shot_day_borrows_offset_from_nearby_day(self):
+        # One shot can't establish a day's clock offset on its own; it uses
+        # the 4th's. Read naively, the 07:10 grind (an orphan) looks closest.
+        shots = [shot_at(4, "08:09"), shot_at(4, "09:00"), shot_at(5, "08:10")]
+        grinds = [grind_at(4, "08:07"), grind_at(4, "08:58"),
+                  grind_at(5, "07:10"), grind_at(5, "08:08")]
+        self.assertIn(("5@08:10", "5@08:08"), pairs(match(shots, grinds)))
 
 
 if __name__ == "__main__":
