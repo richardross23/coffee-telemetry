@@ -1,5 +1,17 @@
 # Known Mahlkönig bug: stale FRAM dose log
 
+> **Update 2026-11-08: not reproducing, and one half was a decoder bug.**
+> The 08:17 dump is current through that morning's shots.
+> - `decode_fram.py` matched `01 00 00 00 08`, but rec[0] is a flags byte
+>   (0/1/2), so it saw only the 124 flags=1 records and looked frozen in
+>   2025. Fixed: it now reads all 1129 records (2025-05-30 → 2026-11-08).
+>   Test: `test_decode_fram.py`.
+> - `backfill.py` never used that marker. On the same dump it parses 880
+>   grinds through 2026-11-08 08:08 and a dry run matches 324/326 shots,
+>   all already correct. The cause of the 2026-11-01 symptom below
+>   (including the grinder's own web UI showing 2025 records) was not
+>   determined.
+
 **Observed 2026-11-01.** The grinder's own web interface and `/fram.bin`
 dump suddenly started returning dose records from a 2025 window
 (2025-08-20 → 2025-12-05, 264 records) instead of the ~900 2026 records
