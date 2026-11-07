@@ -11,3 +11,4 @@ shots/
 # Local dumps from grinder reverse-engineering
 tools/grinder/*.bin
 tools/grinder/*.hex
+tools/grinder/firmware/*.bin
