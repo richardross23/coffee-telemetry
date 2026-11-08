@@ -33,8 +33,9 @@ and build the patched one locally. `*.bin` here is gitignored.
 
 ## Getting the stock image
 `HEM_NGFW300e.bin` is in Mahlkönig's SW300 update package
-(`01_Files if Webserver is available (after SW300)/`), a copy of which is
-posted on home-barista.com. Check it before using it:
+(`01_Files if Webserver is available (after SW300)/`). A copy is linked
+in [this r/espresso comment](https://www.reddit.com/r/espresso/comments/1063z0w/comment/j5wlc6v/).
+Check it before using it:
 
 | | md5 | sha256 |
 |---|---|---|
