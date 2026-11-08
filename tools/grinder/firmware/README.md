@@ -4,11 +4,27 @@ Reverse-engineering and custom patches for the grinder's main controller
 (STM32H7, image `HEM_NGFW300e.bin`, SW300, built Nov 2021). All three
 patches are flashed and confirmed working on one E65S GbW.
 
-> **Unofficial.** Not made, endorsed or supported by Mahlkönig/Hemro.
-> Flashing modified firmware may void your warranty, and a failed flash
-> can leave the grinder needing a service visit. Tested on one E65S GbW
-> on SW300 only; the same SW300 package covers the E80 / E80 GbW, but
-> nobody has tried these patches on one. Use at your own risk.
+> ## ⚠️ Read this first
+>
+> **I'm a hobbyist tinkerer, not a firmware engineer.** This was
+> vibe-coded: an AI assistant (Claude) did the reverse engineering and
+> wrote the patches, and I flashed the result onto my own grinder. It has
+> been tested on exactly one machine: my E65S GbW on SW300.
+>
+> - **You can brick your grinder.** Flashing modified firmware can leave
+>   it dead, misbehaving, or needing a service visit, and will probably
+>   void your warranty.
+> - **I take no responsibility** for anything that happens to your
+>   grinder, your coffee, or you as a result of using any of this.
+> - **There is no support.** If it goes wrong, nobody (me included) is
+>   obliged to help you fix it.
+> - **Unofficial.** Not made, endorsed or supported by Mahlkönig/Hemro.
+> - **Untested elsewhere.** The E80 / E80 GbW share the SW300 update
+>   package, but nobody has tried these patches on one.
+> - If you don't understand what each flash step does, don't do it.
+>
+> Provided as is, with no warranty of any kind (see the repo's MIT
+> `LICENSE`). You use it entirely at your own risk.
 
 ## The three patches
 1. **actualdose** — end-of-grind screen shows the measured weight. Stock
