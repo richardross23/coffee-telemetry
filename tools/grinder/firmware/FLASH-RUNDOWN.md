@@ -48,7 +48,8 @@ The grinder reboots itself when the flash finishes. The flash takes about
 - Don't flash unless `/status` shows `"imageVerified": true` after step 2.
   The md5 check is the updater's only integrity check.
 - One request at a time: the access point is single-radio and its web
-  server is slow.
+  server is slow. The Mac's `coffee-grinder-poll` job reads it from 06:30
+  to 11:05, so stop that first if you flash during those hours.
 - During the flash and reboot: don't cut power and don't drop the Wi-Fi.
 - If an endpoint errors or anything looks off, stop rather than retrying
   blind.

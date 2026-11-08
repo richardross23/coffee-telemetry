@@ -90,6 +90,24 @@ class ApplyBackfillTest(unittest.TestCase):
         apply_backfill([], dry_run=True, unmatched=[s])
         self.assertEqual(s["data"]["metadata"]["ground_weight_g"], 19.5)
 
+    def live_shot(self) -> dict:
+        s = shot(grinder_setting=156)
+        s["data"]["metadata"].update(ground_weight_g=20.01, grind_duration_s=5.395,
+                                     grinder_raw_ts=TS, grinder_match_gap_s=110,
+                                     grinder_source="live")
+        return s
+
+    def test_live_matched_shot_is_not_cleared(self):
+        s = self.live_shot()
+        apply_backfill([], dry_run=True, unmatched=[s])
+        self.assertEqual(s["data"]["metadata"]["ground_weight_g"], 20.01)
+
+    def test_live_matched_shot_is_not_overwritten(self):
+        s = self.live_shot()
+        apply_backfill([(s, grind(999), -60)], dry_run=True)
+        self.assertEqual(s["data"]["metadata"]["ground_weight_g"], 20.01)
+        self.assertEqual(s["data"]["metadata"]["grinder_setting"], 156)
+
 
 class MatchTest(unittest.TestCase):
     def test_skipped_grind_leaves_its_shot_unmatched(self):

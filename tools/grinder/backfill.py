@@ -213,7 +213,7 @@ def apply_backfill(matches: list[tuple[dict, dict, int]], dry_run: bool,
     updated = unchanged = cleared = 0
     for shot in unmatched:
         meta = shot["data"].get("metadata", {})
-        if "grinder_raw_ts" not in meta:
+        if "grinder_raw_ts" not in meta or meta.get("grinder_source") == "live":
             continue
         for k in BACKFILLED_FIELDS:
             meta.pop(k, None)
@@ -222,6 +222,11 @@ def apply_backfill(matches: list[tuple[dict, dict, int]], dry_run: bool,
         cleared += 1
     for shot, grind, gap_s in matches:
         meta = shot["data"].setdefault("metadata", {})
+        # shot-logger paired this one in real time, which beats any pairing
+        # made here from the grinder's clock.
+        if meta.get("grinder_source") == "live":
+            unchanged += 1
+            continue
         new_vals = {
             "ground_weight_g": grind["actual_g"],
             "grind_duration_s": grind["grind_s"],

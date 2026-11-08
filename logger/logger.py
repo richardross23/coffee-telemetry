@@ -11,6 +11,8 @@ Raw path:   <ns>/shot/raw chunks → reassemble → shots/<id>.json on the
             <ns>/shot/raw/complete marker, then ack on <ns>/shot/ack/<id>.
 Edits:      <ns>/shot/metadata/set merges whitelisted fields into a saved
             shot; <ns>/shot/delete removes one.
+Grinder:    <ns>/grinder/last carries each grind seen by the Mac poller
+            (tools/grinder/grinder_poll.py); the next shot picks it up.
 """
 
 import datetime
@@ -46,6 +48,7 @@ T_RAW_COMPLETE = "shot/raw/complete"
 T_SCALE_W = "scale/weight"
 T_META_SET = "shot/metadata/set"
 T_DELETE = "shot/delete"
+T_GRINDER_LAST = "grinder/last"
 
 
 def _topic_suffix(topic: str) -> tuple[str | None, str | None]:
@@ -81,6 +84,12 @@ PREPEND_LOOKBACK_SEC = 10.0
 PREPEND_MAX_WEIGHT_G = 5.0   # heavier samples in this window are cup-placements
 MIN_FINAL_WEIGHT_G = 2.0     # below this, the "shot" is almost certainly a tare event
 WEIGHT_RANGE_G = (-5.0, 200.0)
+
+# A grind usually comes 1-2 minutes before its shot; allow for a slow morning.
+GRIND_LOOKBACK_SEC = 15 * 60
+GRIND_TARGET_G = (15.0, 25.0)   # same limits as tools/grinder/backfill.py
+GRIND_MAX_DELTA_G = 5.0
+GRIND_FIELDS = ("ts", "target_cg", "actual_cg", "grind_ms", "seen_at")
 
 
 def utc_iso() -> str:
@@ -471,6 +480,7 @@ shots_in_flight: dict[str, dict] = defaultdict(
     lambda: {"start": None, "samples": [], "prepend": []}
 )
 scale_buffer: deque = deque()
+recent_grinds: deque = deque(maxlen=8)  # oldest first
 
 
 # --- MQTT handlers ------------------------------------------------------------
@@ -482,7 +492,8 @@ def on_connect(client, userdata, flags, rc, properties=None):
     log.info("connected to %s:%s", BROKER, PORT)
     qos = [(T_START, 0), (T_SAMPLE, 0), (T_END, 0),
            (T_RAW, 0), (T_RAW_COMPLETE, 1),  # QoS 1 — ack handshake
-           (T_SCALE_W, 0), (T_META_SET, 0), (T_DELETE, 0)]
+           (T_SCALE_W, 0), (T_META_SET, 0), (T_DELETE, 0),
+           (T_GRINDER_LAST, 1)]
     client.subscribe([(f"{ns}/{suf}", q) for ns in NAMESPACES for suf, q in qos])
 
 
@@ -552,10 +563,51 @@ def handle_shot_start(shot_id: str, payload: dict) -> None:
     ]
     shots_in_flight[shot_id] = {
         "start": payload,
+        "start_wall": start_wall,
         "samples": [],
         "prepend": prepend,
     }
     log.info("shot %s started (%d prepend samples)", shot_id, len(prepend))
+
+
+def handle_grinder_last(payload: dict) -> None:
+    if not all(k in payload for k in GRIND_FIELDS):
+        log.warning("bad grinder payload: %r", payload)
+        return
+    if any(g["ts"] == payload["ts"] for g in recent_grinds):
+        return  # the retained message comes back on every reconnect
+    recent_grinds.append(payload)
+    log.info("grind %s: %.2fg", payload["ts"], payload["actual_cg"] / 100)
+
+
+def pick_grind(pump_on: float) -> dict | None:
+    """Newest unused grind seen before the pump started. A grind seen after
+    that was made during this shot, for the next one."""
+    used = {(_index[n].get("metadata") or {}).get("grinder_raw_ts")
+            for n in sorted(_index, reverse=True)[:recent_grinds.maxlen]}
+    for grind in reversed(recent_grinds):
+        if grind["ts"] in used:
+            continue
+        if not 0 <= pump_on - grind["seen_at"] <= GRIND_LOOKBACK_SEC:
+            continue
+        target, actual = grind["target_cg"] / 100, grind["actual_cg"] / 100
+        if (GRIND_TARGET_G[0] <= target <= GRIND_TARGET_G[1]
+                and abs(actual - target) <= GRIND_MAX_DELTA_G):
+            return grind
+    return None
+
+
+def grinder_metadata(grind: dict, pump_on: float) -> dict:
+    fields = {
+        "ground_weight_g": round(grind["actual_cg"] / 100, 2),
+        "grind_duration_s": round(grind["grind_ms"] / 1000, 3),
+        "grinder_raw_ts": grind["ts"],
+        "grinder_match_gap_s": int(pump_on - grind["seen_at"]),
+        "grinder_source": "live",
+    }
+    if grind.get("disc_um"):
+        fields["grinder_setting"] = grind["disc_um"]
+    return fields
 
 
 def handle_shot_sample(shot_id: str, payload: dict) -> None:
@@ -725,6 +777,12 @@ def handle_shot_end(shot_id: str, payload: dict) -> None:
     if inherited:
         record.setdefault("metadata", inherited)
 
+    pump_on = (buf or {}).get("start_wall") or time.time() - (record.get("duration_s") or 30)
+    grind = pick_grind(pump_on)
+    if grind:
+        record.setdefault("metadata", {}).update(grinder_metadata(grind, pump_on))
+        log.info("shot %s: matched grind %s", shot_id, grind["ts"])
+
     safe_id = re.sub(r"[^A-Za-z0-9_-]+", "_", shot_id)
     name = f"{utc_iso()}_{safe_id}.json"
     path = os.path.join(OUT, name)
@@ -756,6 +814,10 @@ def on_message(client, userdata, msg):
         payload = json.loads(msg.payload)
     except json.JSONDecodeError as e:
         log.warning("bad json on %s: %s", msg.topic, e)
+        return
+
+    if suffix == T_GRINDER_LAST:
+        handle_grinder_last(payload)
         return
 
     if suffix == T_META_SET:
