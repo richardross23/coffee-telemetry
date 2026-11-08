@@ -1,8 +1,9 @@
 # Mahlkönig E65S GbW — firmware mods (SW300)
 
 Reverse-engineering and custom patches for the grinder's main controller
-(STM32H7, image `HEM_NGFW300e.bin`, SW300, built Nov 2021). All three
-patches are flashed and confirmed working on one E65S GbW.
+(STM32H7, image `HEM_NGFW300e.bin`, SW300, built Nov 2021). The three
+core patches are flashed and confirmed working on one E65S GbW. Three
+optional ones run on the same grinder, with much less time behind them.
 
 > ## ⚠️ Read this first
 >
@@ -36,6 +37,24 @@ patches are flashed and confirmed working on one E65S GbW.
 
 Together they change 36 bytes of the image.
 
+## Optional patches
+Only built if you ask for them with `--patches`. Flashed on one grinder on
+2026-11-09.
+
+4. **logs** — fixes the web log, which stops partway through on stock
+   firmware. Shots are read newest first, with 0.01 g weights and the disc
+   distance (needs `ddd`). The newest 12 shots take two requests.
+5. **laststat** — `/stats` carries the last shot, replacing the counters for
+   recipes 4–6. The fields read 0 until the first grind after power-up, and
+   their values have only been checked in an emulator so far.
+6. **wifiboot** — Wi-Fi starts at every power-up, with no key hold. Holding
+   both keys still logs in as owner.
+
+> **`wifiboot` leaves the access point on all the time with Mahlkönig's
+> published default password.** Anyone in range can reach the grinder's web
+> page and its firmware updater. Whether having Wi-Fi on affects weighing
+> hasn't been tested.
+
 ## Files
 | File | What it is |
 |---|---|
@@ -43,6 +62,7 @@ Together they change 36 bytes of the image.
 | `REVERSE-ENGINEERING.md` | Full notes: RAM/flash addresses, every patch byte, how it was found. |
 | `FLASH-RUNDOWN.md` | Flashing (and rolling back) over the grinder's Wi-Fi updater. |
 | `GRINDER-FIRMWARE-PATCH.md` | FRAM shot-record format reference for the log decoder. |
+| `emu_grinder.py`, `test_patches.py` | Run the firmware's log and `/stats` code in an emulator, to test patches before flashing. Needs `pip install unicorn`. |
 
 No firmware images are in this repo: you supply Mahlkönig's stock image
 and build the patched one locally. `*.bin` here is gitignored.
@@ -57,6 +77,7 @@ Check it before using it:
 |---|---|---|
 | stock `HEM_NGFW300e.bin` | `fe665b4ecb7d57db091730eb2193f85b` | `bdb66ad30c4db40ab3d0db3034b8693aed878bf47b934370f89a8a6a8ed4882b` |
 | patched (all three) | `8c95871295a657f04c389b39e08dea8e` | `a15c5d0e143c40daa842a4a00868823eea19e62e234ebb141b9fb2eff571e772` |
+| patched (all six) | `ff37c39df3735291802b65ce20a25001` | `162413d74f3767e95d1181a1780e7817aa35f8b0ae907bb3e4809f65e0b03d2c` |
 
 The stock md5 is the one Mahlkönig's own SW300 how-to PDF shows in its
 update screenshot. Keep the stock file: it is your rollback image.
@@ -66,7 +87,8 @@ update screenshot. Keep the stock file: it is your rollback image.
 python3 -I patch.py HEM_NGFW300e.bin HEM_NGFW300e.all.bin
 ```
 It prints the output's md5 and sha256, which should match the table. To
-build a subset: `--patches actualdose,shotlog`.
+build a subset: `--patches actualdose,shotlog`. All six:
+`--patches actualdose,ddd,shotlog,logs,laststat,wifiboot`.
 
 ## Flashing
 Over the grinder's Wi-Fi updater at `http://192.168.4.1` (owner mode →

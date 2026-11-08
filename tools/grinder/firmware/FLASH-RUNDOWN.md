@@ -11,10 +11,11 @@ The grinder must already run SW300 (the version with the web page at
 `192.168.4.1`). Older firmware needs Mahlkönig's own update first.
 
 ## Before you start
-1. Build the image with `patch.py` and check its md5 is
-   `8c95871295a657f04c389b39e08dea8e` (see `README.md`).
+1. Build the image with `patch.py` and check its md5 against the table
+   in `README.md`.
 2. Power on in owner mode: hold both front keys while switching on.
    Mahlkönig's SW300 notes say this logs in as owner with Wi-Fi enabled.
+   With `wifiboot` already flashed, a normal power-on is enough.
 3. Join the grinder's `E65…` Wi-Fi network. Password `e65sgbwdemo`, the
    default printed in Mahlkönig's SW300 update instructions.
 4. Check it answers: `curl -s http://192.168.4.1/info`.
@@ -40,7 +41,8 @@ curl -sS -X POST 'http://192.168.4.1/stm?flash'
 curl -sS http://192.168.4.1/status    # repeat; "flashFailed" must stay 0
 ```
 
-The grinder reboots itself when the flash finishes.
+The grinder reboots itself when the flash finishes. The flash takes about
+4 minutes, and it also worked after the owner login had timed out.
 
 ## Hard gates
 - Don't flash unless `/status` shows `"imageVerified": true` after step 2.
@@ -60,3 +62,5 @@ The same three steps with the stock `HEM_NGFW300e.bin` (md5
   should appear and open without owner mode.
 - The next grind's end screen shows the measured weight, and its FRAM shot
   record carries the disc distance.
+- With `wifiboot`, the access point returns about a minute after the flash
+  with no keys held.

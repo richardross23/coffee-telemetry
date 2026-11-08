@@ -1,9 +1,9 @@
 # Mahlkönig E65S GbW / E80 — SW300 firmware reverse-engineering
 
 Notes from reverse-engineering the grinder's main-controller firmware
-(`HEM_NGFW300e.bin`, SW300, built Nov 2021) and building three patches.
-All addresses are in the running image. All three patches are confirmed
-working on hardware.
+(`HEM_NGFW300e.bin`, SW300, built Nov 2021) and building six patches.
+All addresses are in the running image. Patches 1-3 are confirmed working
+on hardware; "Patches 4-6" below says how far the others have been tested.
 
 ## Image
 - STM32H7 + TouchGFX, raw image based at `0x08000000`, built `-O0`.
@@ -82,6 +82,48 @@ Two bytes make Shot Log alone visible to everyone:
 
 Error/Service/Alerts logs are left owner-gated.
 
+## Logs in FRAM
+Four rings; bases at `0x24000468`, sizes at `0x24000478`, control blocks loaded
+from FRAM 0x1000 (12 bytes each: tail, head, count).
+
+| Ring | Base | Size | Holds |
+|---|---|---|---|
+| 0 | 0x01080 | 0x08000 | shots, 29-byte records |
+| 1 | 0x09080 | 0x08000 | load-cell events |
+| 2 | 0x11080 | 0x04000 | errors, calibration, login timeouts |
+| 3 | 0x15080 | 0x29000 | power, settings; each boot writes Grinder Off, then On |
+
+A record is a type byte, a timestamp, then a payload whose size comes from the
+table at `0x24000488`. The on-screen reader wraps its cursor; the `/logs` reader
+doesn't (see `../BUG-FRAM-STALE.md`). Event names are at `0x08082934`, 0xBC bytes each.
+
+## Link to the Wi-Fi module
+USART1 at 115200: `0x32`, length, command, payload, CRC-16. Log requests are
+command `0x0A`, sub-command `0x0C`, then log type and reset flag. `/stats` is
+sub-command `0x0B`; its JSON is built on the main controller at `0x0800E014`. FRAM
+pulls are one request per 1 KB page.
+
+## Power to the Wi-Fi module
+The main controller switches the module on and off. `0x24050618` is the Wi-Fi flag,
+in RAM: set at boot if both keys are held (`0x0800A2E8`) and toggled by the service
+menu (`0x0804B88C`). `0x08007F94` runs every 50 ms and ramps the module's supply
+through DAC1 on PA4, then raises PA8 and PA10; init drives both low (`0x08007D40`,
+`0x08007DFE`). So when the main firmware restarts, the Wi-Fi goes off unless the
+flag is set again. Login timeouts don't touch the flag.
+
+## Patches 4-6: logs, laststat, wifiboot
+Optional, in `patch.py`. `test_patches.py` runs them in an emulator, which covers
+the code's logic but not timing or peripherals. All three were flashed on one
+grinder on 2026-11-09.
+
+- `logs`: a full drain of `/logs?Shots` returned all 1,129 rows in 24 s, newest
+  first, with every timestamp matching a FRAM dump and no restart. It crossed the
+  end of the ring, where the stock reader runs off.
+- `wifiboot`: the access point came back after the flash with no keys held.
+- `laststat`: the fields appear in `/stats`. They read 0 from power-up until the
+  first grind finishes, because the record is in RAM, so their values have only
+  been checked in the emulator.
+
 ## Flashing and recovery
 The Wi-Fi/web module flashes the STM32 through ST's ROM UART bootloader
 (init bootloader, remove write protection, erase, write, reboot). The
@@ -92,7 +134,17 @@ bootloader cannot be erased, a bad image is reflashable as long as the
 Wi-Fi access point comes up; the last-resort recovery is SWD with the
 board opened. See `FLASH-RUNDOWN.md`.
 
+The Wi-Fi firmware starts the bootloader itself (`stm32DFU`, `0x400DA840`): it
+pulses ESP32 GPIO27 and raises GPIO26, which look like the STM32's NRST and BOOT0,
+then sends the 0x7F sync at even parity. The main image plays no part, so a bad
+image can't block a reflash while the module runs, and the module stays up while
+the STM32 is in ROM mode. The access point falls back to the SSID `Wave2_Fallback`
+plus the MAC, same password, when a flag at `0x3FFC2104` is 0, probably when the
+main controller hasn't sent its details. Untested: whether the module starts from
+a cold boot when the main firmware is dead, which decides whether a failed flash
+can be recovered over Wi-Fi.
+
 ## Status
-All three patches flashed and confirmed on hardware: actual dose on
-screen, disc distance in the FRAM record, Shot Log reachable without
-owner mode. Build them with `patch.py` from the stock image.
+Patches 1-3 flashed and confirmed on hardware: actual dose on screen, disc
+distance in the FRAM record, Shot Log reachable without owner mode. Patches
+4-6 are described above. Build them with `patch.py` from the stock image.

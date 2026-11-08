@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Patch the Mahlkönig E65S GbW SW300 STM32 image (HEM_NGFW300e.bin).
 
-Patches (choose with --patches, default: all):
+Patches (choose with --patches, default: these three):
   actualdose  End-of-dose screen shows the measured weight (state+0x90)
               instead of the target (state+0x40).
   ddd         Weight-based shot records store the live disc distance
@@ -13,6 +13,18 @@ Patches (choose with --patches, default: all):
               (2) Shot Log detail header (menu 11, id 0x71) gated level
                   -> 0 at 0x08047348, so the detail view's title shows too.
               Error/Service/Alerts log entries are left owner-gated.
+
+Optional, flashed on one grinder so far, so not in the default set:
+  logs       Fixes /logs running off the end of the shot log. Shots are read
+              newest first, with 0.01 g weights and disc distance (mm) in the
+              last column of weight-based rows.
+  laststat    /stats carries the last shot: lastTs, lastTg, lastAc (0.01 g),
+              lastDisc (um, needs ddd), lastGrnd (ms), lastFlag. They replace
+              the counters of recipes 4-6. All read 0 until the first grind
+              after power-up, and lastTs is 0 while a grind runs.
+  wifiboot    The Wi-Fi module starts at every power-up, without owner login.
+              Holding both keys still logs in as owner. The access point is
+              then always on, with the published default password.
 
 Usage: python3 -I patch.py <original HEM_NGFW300e.bin> <output.bin> [--patches actualdose,ddd,shotlog]
 """
@@ -73,7 +85,59 @@ SHOTLOG = [
      bytes.fromhex("0023")),  # movs r3,#0
 ]
 
-PATCHES = {"actualdose": ACTUALDOSE, "ddd": DDD, "shotlog": SHOTLOG}
+# logs: the /logs reader never wrapped its cursor at the end of the ring, so a
+# drain ran off the end and overwrote RAM below its record buffer. logs_start
+# picks the first record on a reset; logs_next moves the cursor, with wrapping,
+# backwards for shots and forwards for the other logs.
+LOGS_CAVE = 0x08183780
+LOGS_STUB = bytes.fromhex(
+    "29b95b681d3b03d503f5004300e01b68094a7047"                              # logs_start
+    "094b1b7807490968084a52f8232003b94042401800d58018904228bf801a421a7047"  # logs_next
+    "00bf"
+    "68060524" "70060524" "78040024"                # cursor, log type, ring sizes
+)
+LOGS = [
+    (0x0800DF68, bytes.fromhex("1b68274a"), thumb_branch(0x0800DF68, LOGS_CAVE, True)),
+    (0x0800EB9C, bytes.fromhex("03461a46"), thumb_branch(0x0800EB9C, LOGS_CAVE + 0x14, True)),
+    (0x0801D4CA, bytes.fromhex("d3f81530"), bytes.fromhex("d3f80d30")),  # ldr.w r3,[r3,#0xd]
+    (0x0801D4D2, bytes.fromhex("b8ee644a"), bytes.fromhex("b8eee44a")),  # vcvt.f32.s32
+    (0x08087B34, b"%.1fg, %.1fg, %.3fs, %.3fs", b"%.2fg, %.2fg, %.3fs, %.3fm"),
+    (LOGS_CAVE, bytes(len(LOGS_STUB)), LOGS_STUB),
+]
+
+# laststat: six /stats counters (recipes 4-6) load from the record of the last
+# shot instead. Each load becomes a bl to a stub that returns the value in r3.
+LASTSTAT_CAVE = 0x081837C8
+LASTSTAT_STUB = bytes.fromhex(
+    "0b4bd3f801307047" "094bd3f805307047" "074bd3f809307047"   # ts, target, actual
+    "054bd3f80d307047" "034bd3f811307047" "014b5b7e7047"       # disc, grind, flags
+    "00bf" "a4aa0524"                                          # shot record
+)
+LASTSTAT = [
+    (LASTSTAT_CAVE, bytes(len(LASTSTAT_STUB)), LASTSTAT_STUB),
+]
+for site, old, stub, fmt, was, now in (
+    (0x0800E42A, "324b5b6a", 0x00, 0x080809E0, b'"r4Time"', b'"lastTs"'),
+    (0x0800E44A, "2a4b9b6a", 0x08, 0x080809F0, b'"r5Time"', b'"lastTg"'),
+    (0x0800E46A, "224bdb6a", 0x10, 0x08080A00, b'"r6Time"', b'"lastAc"'),
+    (0x0800E54E, "b04bdb6b", 0x18, 0x08080A4C, b'"r4Weight"', b'"lastDisc"'),
+    (0x0800E56E, "a84b1b6c", 0x20, 0x08080A60, b'"r5Weight"', b'"lastGrnd"'),
+    (0x0800E58E, "a04b5b6c", 0x28, 0x08080A74, b'"r6Weight"', b'"lastFlag"'),
+):
+    LASTSTAT.append((site, bytes.fromhex(old), thumb_branch(site, LASTSTAT_CAVE + stub, True)))
+    LASTSTAT.append((fmt, was, now))
+
+# wifiboot: at boot the code logs in as owner and sets the Wi-Fi flag only if
+# both keys are held. Rewritten in place so the flag is always set:
+#   cbz r0,set_flag; ldr r3,=state; movs r2,#1; strb.w r2,[r3,#0xf5]; nops
+WIFIBOOT = [
+    (0x0800A2D8,
+     bytes.fromhex("0346002b01f062834c4b012283f8f520"),
+     bytes.fromhex("30b14e4b012283f8f52000bf00bf00bf")),
+]
+
+PATCHES = {"actualdose": ACTUALDOSE, "ddd": DDD, "shotlog": SHOTLOG,
+           "logs": LOGS, "laststat": LASTSTAT, "wifiboot": WIFIBOOT}
 
 
 def main():

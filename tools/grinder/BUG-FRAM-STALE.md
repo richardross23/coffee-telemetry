@@ -42,7 +42,11 @@ short file from it.
 
 ## Firmware: the log reader doesn't wrap
 
-From reading the SW300 image; predicted, not observed on the grinder.
+This is why the web log looked stuck. A log pasted from the web page on
+2026-04-29 has 566 rows: row 551 is the record at the end of the ring
+(2025-08-21 08:09:45), 15 more rows follow and match FRAM, then it stops. The
+on-screen reader wraps with `(cursor + len) % size` at `0x0801C57A`; `/logs`
+doesn't. `firmware/test_patches.py` reproduces the overrun in an emulator.
 
 `/logs?Shots` starts at the oldest record (ring control at FRAM 0x1000: 12 bytes
 per log, tail, head, count) and adds each record's length to a cursor at
@@ -59,6 +63,11 @@ grinder.
 
 This does not explain a failure on the first page, which stays far from the end
 of the ring.
+
+The optional `logs` patch in `firmware/patch.py` wraps the cursor. On 2026-11-09 a
+drain on the real grinder returned all 1,129 rows, past the end of the ring, with
+no restart. The first-page failure didn't recur in about 100 requests, but its
+cause wasn't found.
 
 ## Diagnosis commands
 
