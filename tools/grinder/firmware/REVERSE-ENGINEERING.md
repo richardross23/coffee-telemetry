@@ -120,9 +120,9 @@ grinder on 2026-11-09.
   first, with every timestamp matching a FRAM dump and no restart. It crossed the
   end of the ring, where the stock reader runs off.
 - `wifiboot`: the access point came back after the flash with no keys held.
-- `laststat`: the fields appear in `/stats`. They read 0 from power-up until the
-  first grind finishes, because the record is in RAM, so their values have only
-  been checked in the emulator.
+- `laststat`: after a real grind, the time, target, actual, disc distance and grind
+  time in `/stats` matched the newest `/logs` row. The fields read 0 from power-up
+  until the first grind finishes, because the record is in RAM.
 
 ## Flashing and recovery
 The Wi-Fi/web module flashes the STM32 through ST's ROM UART bootloader

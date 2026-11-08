@@ -45,8 +45,7 @@ Only built if you ask for them with `--patches`. Flashed on one grinder on
    firmware. Shots are read newest first, with 0.01 g weights and the disc
    distance (needs `ddd`). The newest 12 shots take two requests.
 5. **laststat** — `/stats` carries the last shot, replacing the counters for
-   recipes 4–6. The fields read 0 until the first grind after power-up, and
-   their values have only been checked in an emulator so far.
+   recipes 4–6. The fields read 0 until the first grind after power-up.
 6. **wifiboot** — Wi-Fi starts at every power-up, with no key hold. Holding
    both keys still logs in as owner.
 
