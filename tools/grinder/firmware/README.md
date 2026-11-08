@@ -95,4 +95,6 @@ Wi-Fi access point). See `FLASH-RUNDOWN.md`. Reversible: flash the stock
 image the same way.
 
 The disc distance lands in the FRAM shot log; `../backfill.py` reads it
-from a FRAM dump into each shot's `grinder_setting`.
+from a FRAM dump into each shot's `grinder_setting`. With `laststat`,
+`../grinder_poll.py` gets it from `/stats` as each grind finishes; see
+[`../../README.md`](../../README.md).

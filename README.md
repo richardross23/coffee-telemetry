@@ -2,7 +2,7 @@
 
 A small home-server stack that captures every espresso shot from a
 Bluetooth scale + accelerometer-instrumented machine and renders it on a
-live dashboard. Three containers, one MQTT topic tree, one self-contained
+live dashboard. Four containers, one MQTT topic tree, one self-contained
 JSON file per shot.
 
 ![Dashboard with a live shot in progress and the history sidebar docked on the right](docs/dashboard.png)
@@ -48,10 +48,18 @@ The MQTT contract is documented there in
 - **`mosquitto/`** — broker config (anonymous LAN-only)
 - **`logger/`** — Python service that subscribes to `coffee/shot/*`, buffers
   samples per shot, and writes one self-contained JSON file per shot
+- **`native-subscriber/`** — reads the device over the ESPHome Native API and
+  archives each shot's raw JSON, alongside the MQTT path
 - **`web/`** — single-file dashboard (HTML/CSS/JS), MQTT-over-WebSockets
   client, live curve + history replay + Decent `.shot` export
 - **`tools/`** — utilities that aren't part of the running stack (see
   [`tools/README.md`](tools/README.md))
+
+With a Mahlkönig E65S GbW, each shot can also carry what the grinder
+measured: dose, grind time and disc distance. [`tools/README.md`](tools/README.md)
+covers the live path and the FRAM sync, and
+[`tools/grinder/firmware/`](tools/grinder/firmware/README.md) has the
+optional firmware patches and their risks.
 
 ## Quick start
 
@@ -126,6 +134,9 @@ docker compose logs -f shot-logger    # one line per saved shot
 docker compose logs -f mosquitto      # broker logs
 docker compose restart shot-logger    # reload after editing logger.py
 docker compose down                   # stop everything (data persists)
+
+python3 logger/test_grinder_match.py  # grind-to-shot matching tests
+python3 -m unittest discover -s tools/grinder -p 'test_*.py'
 ```
 
 ## Notes
@@ -143,10 +154,11 @@ docker compose down                   # stop everything (data persists)
 
 ## What this isn't
 
-A product. It's a personal tool that runs on one Mac mini next to one
-Synchronika and talks to one Acaia Lunar. Heavily AI-assisted (most of
-the boilerplate, much of the dashboard), reviewed and shaped by hand.
-Single-user, LAN-only, no auth, no tests beyond the smoke check above.
+A product. It's a personal tool that runs on one NAS next to one
+Synchronika, with a Mac bridging one grinder's Wi-Fi, and talks to one
+Acaia Lunar. Heavily AI-assisted (most of the boilerplate, much of the
+dashboard), reviewed and shaped by hand. Single-user, LAN-only, no auth,
+and the only tests beyond the smoke check above cover the grinder path.
 
 If it suits your setup, take it. If not, the firmware contracts
 (`coffee/shot/{start,sample,end,raw}`) are documented enough to

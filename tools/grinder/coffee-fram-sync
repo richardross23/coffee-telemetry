@@ -4,8 +4,9 @@
 # shot archive.
 #
 # Preconditions:
-#   1. Grinder is powered on in OWNER mode (hold both upper/lower buttons
-#      during power-on). Normal power-on does not activate the WiFi AP.
+#   1. Grinder's WiFi AP is up. On stock firmware that means OWNER mode
+#      (hold both upper/lower buttons during power-on); with the wifiboot
+#      patch, any power-on.
 #   2. This Mac's WiFi (en1) is associated with the grinder's SSID. The
 #      Mac stays on main LAN via ethernet (en0), so refuge access over
 #      ssh/scp continues working while WiFi handles the grinder.

@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # coffee-fram-sync-oneshot — do the whole FRAM sync in one command.
-# Assumes you've just put the grinder into OWNER MODE (hold both buttons
-# while flipping the rear switch on). Runs quickly enough to beat the
-# ~2-minute no-client AP timeout.
+# On stock firmware, assumes you've just put the grinder into OWNER MODE
+# (hold both buttons while flipping the rear switch on), and runs quickly
+# enough to beat the ~2-minute no-client AP timeout. With the wifiboot
+# patch, any power-on will do.
 #
 # Sequence:
 #   1. Join grinder AP (password auto-pulled from keychain)

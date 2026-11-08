@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Fetch the Mahlkönig E65S GBW grinder's FRAM dump.
 
-The on-device shot log lives in non-volatile FRAM on the grinder MCU,
-NOT in the rotating RAM log that /logs? reads. To extract it:
+The on-device shot log lives in non-volatile FRAM on the grinder MCU.
+/logs? reads it a page at a time; this takes the whole chip at once:
 
     POST /stm?framFetch       # tells the WiFi module to slurp FRAM into a file
     GET  /status              # poll until status.framProgress == 100
