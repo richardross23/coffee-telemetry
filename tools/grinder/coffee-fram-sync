@@ -19,6 +19,7 @@ GRINDER=${GRINDER:-http://192.168.4.1}
 REFUGE_HOST=${REFUGE_HOST:-refuge}
 REMOTE_PATH=${REMOTE_PATH:-/tmp/fram.bin}
 REMOTE_SCRIPT=${REMOTE_SCRIPT:-/volume2/docker/coffee/tools/grinder/backfill.py}
+FRAM_SIZE=262144
 
 LOCAL_TMP=$(mktemp -t fram.XXXXXX)
 trap 'rm -f "$LOCAL_TMP"' EXIT
@@ -52,9 +53,13 @@ say "► POST /stm?framFetch"
 curl -sS --max-time 10 -X POST "$GRINDER/stm?framFetch" >/dev/null
 
 # --- 3. poll /status until framProgress == 100 -------------------------------
+# framProgress can still read 100 from the previous fetch, while fram.bin is
+# being rewritten. Only a 100 that follows a lower reading means this fetch is
+# done (a stale 100 caused the "frozen in 2025" dumps of 2026-11-01).
 say "► waiting for framProgress=100 (expect ~65s)…"
 DEADLINE=$(( $(date +%s) + 120 ))
 LAST=-1
+STARTED=""
 while [ "$(date +%s)" -lt "$DEADLINE" ]; do
   PROG=$(curl -sS --max-time 5 "$GRINDER/status" \
          | python3 -c 'import sys,json; print(json.load(sys.stdin).get("framProgress",-1))' 2>/dev/null || echo -1)
@@ -62,9 +67,16 @@ while [ "$(date +%s)" -lt "$DEADLINE" ]; do
     say "  framProgress=$PROG%"
     LAST=$PROG
   fi
-  [ "$PROG" = "100" ] && break
+  if [ "$PROG" -ge 0 ] && [ "$PROG" -lt 100 ]; then
+    STARTED=1
+  fi
+  [ -n "$STARTED" ] && [ "$PROG" = "100" ] && break
   sleep 1.5
 done
+if [ -z "$STARTED" ]; then
+  say "  timed out: the FRAM fetch never started (progress stayed at $PROG)"
+  exit 2
+fi
 if [ "$PROG" != "100" ]; then
   say "  timed out waiting for FRAM regen (last progress=$PROG)"
   exit 2
@@ -78,14 +90,14 @@ SIZE=0
 for attempt in 1 2 3; do
   curl -sS --max-time 60 "$GRINDER/fram.bin" -o "$LOCAL_TMP"
   SIZE=$(wc -c < "$LOCAL_TMP" | tr -d ' ')
-  if [ "$SIZE" -ge 10000 ]; then
+  if [ "$SIZE" -eq "$FRAM_SIZE" ]; then
     break
   fi
-  say "  attempt $attempt: $SIZE bytes (placeholder) — retrying in 3s"
+  say "  attempt $attempt: $SIZE of $FRAM_SIZE bytes — retrying in 3s"
   sleep 3
 done
-if [ "$SIZE" -lt 10000 ]; then
-  say "  download still looks truncated after 3 attempts ($SIZE bytes)."
+if [ "$SIZE" -ne "$FRAM_SIZE" ]; then
+  say "  download still incomplete after 3 attempts ($SIZE of $FRAM_SIZE bytes)."
   say "  grinder may have a persistent server quirk; try power-cycling it."
   exit 3
 fi

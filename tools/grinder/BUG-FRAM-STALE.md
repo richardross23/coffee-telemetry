@@ -1,69 +1,64 @@
-# Known Mahlkönig bug: stale FRAM dose log
+# "Frozen" FRAM dose log: a partial download, not a grinder bug
 
-> **Update 2026-11-08: not reproducing, and one half was a decoder bug.**
-> The 08:17 dump is current through that morning's shots.
-> - `decode_fram.py` matched `01 00 00 00 08`, but rec[0] is a flags byte
->   (0/1/2), so it saw only the 124 flags=1 records and looked frozen in
->   2025. Fixed: it now reads all 1129 records (2025-05-30 → 2026-11-08).
->   Test: `test_decode_fram.py`.
-> - `backfill.py` never used that marker. On the same dump it parses 880
->   grinds through 2026-11-08 08:08 and a dry run matches 324/326 shots,
->   all already correct. The cause of the 2026-11-01 symptom below
->   (including the grinder's own web UI showing 2025 records) was not
->   determined.
+**Resolved 2026-11-08.** The grinder never stopped logging. `coffee-fram-sync`
+shipped a partial dump to the backfill.
 
-**Observed 2026-11-01.** The grinder's own web interface and `/fram.bin`
-dump suddenly started returning dose records from a 2025 window
-(2025-08-20 → 2025-12-05, 264 records) instead of the ~900 2026 records
-that had been there the day before. The RTC is correct — the general
-settings screen shows the right day/month/year and time — but the shot
-log stopped updating with current activity.
+## What happened (2026-11-01, 01:35)
 
-Not a timezone / parser issue: raw bytes verified. `rec[5:9]` little-endian
-uint32 reads e.g. `1755769662` = `2025-08-21T09:47:42Z`, matching real
-grind weights + durations.
+```
+► POST /stm?framFetch
+► waiting for framProgress=100 (expect ~65s)…
+  framProgress=100%
+► downloading /fram.bin
+     12288 bytes
+```
 
-## What's affected
+`framProgress` still read 100 from the previous fetch, so the script downloaded
+`/fram.bin` at once, while the new dump was being written. It got 12,288 of
+262,144 bytes and passed a 10,000-byte check. The start of the shot log held
+2025 records, so backfill parsed 264 records (2025-08-20 → 2025-12-05) and
+matched no 2026 shots.
 
-- `coffee-fram-sync` runs successfully (grinder HTTP responds, regen
-  completes, download works after the usual retry) but the backfill
-  matches 0 shots because the record timestamps don't fall near any
-  real 2026 shot.
-- Per-shot `ground_weight_g` and `grind_duration_s` can't be backfilled
-  until the grinder is logging current activity again.
+The log itself was healthy: the 2026-11-08 dump has records on every day from
+2026-10-31 to 2026-11-08, with no gap.
 
-## What's NOT affected
+## Fix
 
-- Sticky metadata on new shots. `grinder_setting`, `roast_date`, and
-  `bean_type` ride forward via logger.py's `latest_metadata()`
-  inheritance. The New Bag / Grind Change iOS Shortcuts call
-  `set_sticky.py` on refuge, which updates the latest shot — next
-  shot inherits it.
-- Dashboard RI, chip layout, everything else.
+- `coffee-fram-sync` only trusts a 100 that follows a lower reading, and
+  requires exactly 262,144 bytes.
+- `backfill.py` refuses a file that stops before the end of the shot log
+  (0x9080). Backfill also clears values from shots that lose their match, so a
+  partial dump would now remove data rather than just match nothing.
 
-## Workaround
+`fetch_fram.py` still trusts the first 100 it sees; backfill's check catches a
+short file from it.
 
-Don't run FRAM sync until the grinder un-sticks itself. The iOS Shortcut
-still works mechanically, it just produces 0 matches.
+## Things that look similar
 
-Operator plan: power the grinder off overnight and see whether the
-dose-log recovers. If it does, re-run FRAM sync and the next ~day of
-real 2026 grinds will backfill cleanly. If it doesn't, Mahlkönig
-support territory.
+- `decode_fram.py` used to match `01 00 00 00 08`, so it saw only records whose
+  preceding flags byte was 1, and looked stuck in old dates. Fixed 2026-11-08.
+- The grinder's web log lists the oldest record first, so 2025 rows at the top
+  are normal.
 
-## If this recurs
+## Firmware: the log reader doesn't wrap
 
-Three options for making the 264 (or N) 2025-dated records usable:
+From reading the SW300 image; predicted, not observed on the grinder.
 
-1. Compute a per-run offset (`today - max(fram_date)` ≈ constant) and
-   shift all records by that offset. Fragile and hides the real bug.
-2. Match by grind weight + sequence rather than timestamp. Possible —
-   grinds are highly stereotyped (18–22 g) but shot↔grind pairing was
-   designed around timestamps for a reason.
-3. Shrug and move on; sticky metadata still gives you per-shot
-   grinder_setting via the Shortcut flow.
+`/logs?Shots` starts at the oldest record (ring control at FRAM 0x1000: 12 bytes
+per log, tail, head, count) and adds each record's length to a cursor at
+`0x0800EBA0`. Nothing wraps that cursor at the end of the 0x8000-byte ring,
+although the log writer does wrap its own pointers. The shot ring is full, so a
+full drain runs off the end after about 200 records (tail 0x695C on 2026-11-08).
 
-Default to option 3 unless the grinder stays broken for weeks.
+Past the end, `0x0801C0DC` computes a negative first length and copies `N + 0x25`
+bytes to `buffer - N`, overwriting RAM below `0x2405B078`; the first object
+(120 bytes below) is reached about 5 records past the end. `0x080076C0` also has
+a `while(1)` trap for lengths over 0x800. The watchdog (about 1.5 s) is refreshed
+from the task that serves these requests, so a hang there should reset the
+grinder.
+
+This does not explain a failure on the first page, which stays far from the end
+of the ring.
 
 ## Diagnosis commands
 
@@ -74,14 +69,4 @@ coffee-fram-sync-oneshot
 # Dry-run backfill with current fram.bin
 ssh refuge python3 /volume2/docker/coffee/tools/grinder/backfill.py \
     --fram-bin /tmp/fram.bin --dry-run
-
-# Inspect raw bytes if timestamps look wrong
-ssh refuge "python3 -c '
-import struct, datetime
-with open(\"/tmp/fram.bin\",\"rb\") as f: buf=f.read()
-for i in range(5):
-    off = 0x1080 + i*29
-    ts = struct.unpack(\"<I\", buf[off+5:off+9])[0]
-    print(i, ts, datetime.datetime.fromtimestamp(ts, datetime.timezone.utc))
-'"
 ```

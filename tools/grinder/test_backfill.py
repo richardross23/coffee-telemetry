@@ -6,11 +6,14 @@
 
 from __future__ import annotations
 
+import contextlib
 import datetime
+import io
 import unittest
 from pathlib import Path
+from unittest import mock
 
-from backfill import apply_backfill, match, parse_fram
+from backfill import apply_backfill, main, match, parse_fram
 from test_decode_fram import fram, record
 
 TS = 1_794_125_321  # 2026-11-08 08:08:41 grinder wall clock
@@ -105,6 +108,31 @@ class MatchTest(unittest.TestCase):
         grinds = [grind_at(4, "08:07"), grind_at(4, "08:58"),
                   grind_at(5, "07:10"), grind_at(5, "08:08")]
         self.assertIn(("5@08:10", "5@08:08"), pairs(match(shots, grinds)))
+
+
+class MainTest(unittest.TestCase):
+    def run_main(self, path: Path):
+        argv = ["backfill.py", "--fram-bin", str(path), "--dry-run"]
+        out = io.StringIO()
+        with mock.patch("sys.argv", argv), \
+             mock.patch("backfill.load_shots", return_value=[]) as load, \
+             contextlib.redirect_stdout(out), contextlib.redirect_stderr(out):
+            return main(), load
+
+    def test_partial_download_is_refused_before_touching_shots(self):
+        # 2026-11-01: a 12,288-byte file held only the oldest records. Every
+        # newer shot would look unmatched and lose its backfilled values.
+        path = fram(record(0, TS))
+        with open(path, "r+b") as f:
+            f.truncate(12288)
+        code, load = self.run_main(path)
+        self.assertNotEqual(code, 0)
+        load.assert_not_called()
+
+    def test_dump_covering_the_shot_log_is_processed(self):
+        code, load = self.run_main(fram(record(0, TS)))
+        self.assertEqual(code, 0)
+        load.assert_called_once()
 
 
 if __name__ == "__main__":

@@ -51,6 +51,7 @@ TS_FN = re.compile(r"^(\d{8}T\d{6}Z)_")
 # FRAM layout (verified against firmware 3.0, build 2021-09-21)
 REC_SIZE = 29
 REGION_START = 0x1080
+REGION_END = 0x9080           # end of the shot log; shorter = partial download
 VALID_TS_LO = 1_577_836_800  # 2020-01-01
 VALID_TS_HI = 2_000_000_000  # 2033-05
 VALID_TARGET_G = (15.0, 25.0)
@@ -284,6 +285,14 @@ def main() -> int:
     if not args.fram_bin.is_file():
         print(f"not a file: {args.fram_bin}", file=sys.stderr)
         return 1
+
+    # A partial file holds only the oldest records, so every newer shot would
+    # look unmatched and lose its backfilled values.
+    size = args.fram_bin.stat().st_size
+    if size < REGION_END:
+        print(f"partial FRAM dump: {size} bytes, shot log ends at {REGION_END}",
+              file=sys.stderr)
+        return 2
 
     grinds = parse_fram(args.fram_bin)
     shots = load_shots()
