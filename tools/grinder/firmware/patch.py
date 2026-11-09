@@ -25,6 +25,12 @@ Optional, flashed on one grinder so far, so not in the default set:
   wifiboot    The Wi-Fi module starts at every power-up, without owner login.
               Holding both keys still logs in as owner. The access point is
               then always on, with the published default password.
+  enddecimals The end-of-shot weight shows two decimals. Other screens keep
+              the "Weight Dec. Digits" setting.
+  finalweight The end-of-shot screen and the shot log hold the same weight,
+              locked 2 s after the motor stops, instead of the log taking the
+              last steady reading before the portafilter is lifted. Apply after
+              actualdose. Never flashed.
 
 Usage: python3 -I patch.py <original HEM_NGFW300e.bin> <output.bin> [--patches actualdose,ddd,shotlog]
 """
@@ -136,8 +142,37 @@ WIFIBOOT = [
      bytes.fromhex("30b14e4b012283f8f52000bf00bf00bf")),
 ]
 
+# The dose screen reads "Weight Dec. Digits" here; state 0x101 is the end of a
+# weight-based shot. r3 holds the settings base on entry and the decimals on return.
+ENDDEC_CAVE = 0x08183800
+ENDDEC_STUB = bytes.fromhex("054a1288" "40f20111" "8a4202d0" "93f8ed30" "7047"
+                            "0223" "7047" "00bf" "808f0524")
+ENDDECIMALS = [
+    (0x0804D59A, bytes.fromhex("93f8ed30"), thumb_branch(0x0804D59A, ENDDEC_CAVE, True)),
+    (ENDDEC_CAVE, bytes(len(ENDDEC_STUB)), ENDDEC_STUB),
+]
+
+# finalweight: the shot record's weight is rewritten on every steady reading until
+# the portafilter is lifted, which is also when the result screen closes. It now
+# stops 2 s after the motor stops, and the screen shows the record. Before the first
+# steady reading the record is 0 (cleared at the start of the grind), so the screen
+# stays live. r3 holds the machine state on entry to both stubs.
+FINAL_CAVE = 0x08183820
+FINAL_STUB = bytes.fromhex(
+    "094a" "d2f80920" "0ab9" "d3f89020" "7047"                          # weight to show, in r2
+    "5a6d" "b2f5fa6f" "05d3" "044a" "d2f80920" "0ab1" "1346" "7047"     # weight to record, in r3
+    "d3f89030" "7047"
+    "a4aa0524"                                                          # shot record
+)
+FINALWEIGHT = [
+    (0x0804D392, bytes.fromhex("d3f89020"), thumb_branch(0x0804D392, FINAL_CAVE, True)),
+    (0x0800AFD4, bytes.fromhex("d3f89030"), thumb_branch(0x0800AFD4, FINAL_CAVE + 0x0E, True)),
+    (FINAL_CAVE, bytes(len(FINAL_STUB)), FINAL_STUB),
+]
+
 PATCHES = {"actualdose": ACTUALDOSE, "ddd": DDD, "shotlog": SHOTLOG,
-           "logs": LOGS, "laststat": LASTSTAT, "wifiboot": WIFIBOOT}
+           "logs": LOGS, "laststat": LASTSTAT, "wifiboot": WIFIBOOT,
+           "enddecimals": ENDDECIMALS, "finalweight": FINALWEIGHT}
 
 
 def main():

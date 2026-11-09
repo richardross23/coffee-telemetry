@@ -2,7 +2,7 @@
 
 Reverse-engineering and custom patches for the grinder's main controller
 (STM32H7, image `HEM_NGFW300e.bin`, SW300, built Nov 2021). The three
-core patches are flashed and confirmed working on one E65S GbW. Three
+core patches are flashed and confirmed working on one E65S GbW. Four
 optional ones run on the same grinder, with much less time behind them.
 
 > ## ⚠️ Read this first
@@ -38,8 +38,8 @@ optional ones run on the same grinder, with much less time behind them.
 Together they change 36 bytes of the image.
 
 ## Optional patches
-Only built if you ask for them with `--patches`. Flashed on one grinder on
-2026-11-09.
+Only built if you ask for them with `--patches`. Patches 4–7 were flashed on
+one grinder on 2026-11-09.
 
 4. **logs** — fixes the web log, which stops partway through on stock
    firmware. Shots are read newest first, with 0.01 g weights and the disc
@@ -48,6 +48,12 @@ Only built if you ask for them with `--patches`. Flashed on one grinder on
    recipes 4–6. The fields read 0 until the first grind after power-up.
 6. **wifiboot** — Wi-Fi starts at every power-up, with no key hold. Holding
    both keys still logs in as owner.
+7. **enddecimals** — the end-of-shot weight shows two decimals, whatever the
+   "Weight Dec. Digits" setting says.
+8. **finalweight** — the end-of-shot screen and the shot log hold the same
+   weight, locked 2 s after the motor stops. Stock firmware keeps rewriting the
+   logged weight until the portafilter is lifted. Needs `actualdose`. Tested
+   in the emulator only, never flashed.
 
 > **`wifiboot` leaves the access point on all the time with Mahlkönig's
 > published default password.** Anyone in range can reach the grinder's web
@@ -77,6 +83,8 @@ Check it before using it:
 | stock `HEM_NGFW300e.bin` | `fe665b4ecb7d57db091730eb2193f85b` | `bdb66ad30c4db40ab3d0db3034b8693aed878bf47b934370f89a8a6a8ed4882b` |
 | patched (all three) | `8c95871295a657f04c389b39e08dea8e` | `a15c5d0e143c40daa842a4a00868823eea19e62e234ebb141b9fb2eff571e772` |
 | patched (all six) | `ff37c39df3735291802b65ce20a25001` | `162413d74f3767e95d1181a1780e7817aa35f8b0ae907bb3e4809f65e0b03d2c` |
+| patched (all seven) | `2583cb13b75214cbfe6e9c0f51e20950` | `d64f13df3704baaf5693c9f8dc4928e6703c42d00dd6e292a63881d3592af6a2` |
+| patched (all eight) | `59f63cd3edb298c2c7e9e6786dcdf289` | `ce84eb01450018df786ef8dcdef91ec1bf306706401397ee21036eb17ce098d9` |
 
 The stock md5 is the one Mahlkönig's own SW300 how-to PDF shows in its
 update screenshot. Keep the stock file: it is your rollback image.
@@ -87,7 +95,8 @@ python3 -I patch.py HEM_NGFW300e.bin HEM_NGFW300e.all.bin
 ```
 It prints the output's md5 and sha256, which should match the table. To
 build a subset: `--patches actualdose,shotlog`. All six:
-`--patches actualdose,ddd,shotlog,logs,laststat,wifiboot`.
+`--patches actualdose,ddd,shotlog,logs,laststat,wifiboot`. Add
+`,enddecimals` for seven, then `,finalweight` for eight.
 
 ## Flashing
 Over the grinder's Wi-Fi updater at `http://192.168.4.1` (owner mode →

@@ -1,9 +1,10 @@
 # Mahlkönig E65S GbW / E80 — SW300 firmware reverse-engineering
 
 Notes from reverse-engineering the grinder's main-controller firmware
-(`HEM_NGFW300e.bin`, SW300, built Nov 2021) and building six patches.
+(`HEM_NGFW300e.bin`, SW300, built Nov 2021) and building eight patches.
 All addresses are in the running image. Patches 1-3 are confirmed working
-on hardware; "Patches 4-6" below says how far the others have been tested.
+on hardware; "Patches 4-6" and "Patches 7-8" below say how far the others
+have been tested.
 
 ## Image
 - STM32H7 + TouchGFX, raw image based at `0x08000000`, built `-O0`.
@@ -65,7 +66,9 @@ Menu visibility: the filter at `0x080444F4` reads each row's required
 level from the layout table `0x240508BC` (menu stride 0x32 slots, slot
 stride 0x10; slot+0 = item id, slot+4 = required level) and compares it
 to the current login level at `state+0xF5`; it hides the row if
-level > login. Login levels: 0 = none, 1 = owner, 5 = service.
+level > login. Login levels: 0 = none, 1 = owner, 2 = service, 3 =
+manufacturer. Level 5 is never assigned, so a row at 5 is hidden from every
+login; several rows use it when option bit 0 of `0x081E0014` is clear.
 
 The Machine Logs list is menu 5. Its rows (ids `0x1D` Error, `0x1E`
 Shot, `0x1F` Alerts, `0x20` Service) are all placed at level 1 (owner),
@@ -81,6 +84,63 @@ Two bytes make Shot Log alone visible to everyone:
 ```
 
 Error/Service/Alerts logs are left owner-gated.
+
+## How a weight-based grind works
+Read from the stock image and not exercised on hardware. The ADC sample rate is
+unknown, so limits that count samples aren't converted to time. `S` is the machine
+state at `0x24058F80`, `SET` the settings at `0x240593A0`.
+
+**Weighing** (ADC callback `0x080039F0`). The raw load-cell value passes through
+moving averages of 1111, 523 and 359 samples. Grams = (x − cal0) × 1000 / (cal1 −
+cal0), with cal0 and cal1 at `0x2400002C` and `0x24000030`. A separate noise figure
+comes from the last 1000 samples, averaged over 300; `S+0xDC` holds it in 0.01 g.
+The scale counts as quiet when that is under the limit chosen by GbW Resolution
+(`SET+0x65`): 0 = Low `SET+0x8C` (default 50), 1 = Medium `SET+0x8A` (20), otherwise
+High `SET+0x88` (5), in 0.01 g. The factory value is 0.
+
+**States** (`S+0`, jump tables from `0x08009EEC`):
+
+| State | Meaning |
+|---|---|
+| 0x11 | idle |
+| 0x21 | portafilter seen, waiting for quiet |
+| 0x22-0x25 | portafilter matching and capture |
+| 0x42 | recipe chosen, waiting to start |
+| 0x82 / 0x83 | weight-based / time-based grind |
+| 0x84 / 0x85 | manual grind |
+| 0x101 | weight-based shot finished |
+| 0x102 / 0x103 | time-based shot finished |
+| 0x1002 / 0x1003 | paused |
+| 0x401-0x40F | load-cell calibration |
+
+**Before the grind.** With portafilter matching on, the weight is compared with the
+saved table at `0x24059350` (8 bytes each: `+1` recipe, `+2` tolerance, `+4` weight;
+kept at FRAM 0xB00). At 0x42, `S+0x40` takes the recipe target and `S+0x44` the
+recipe's correction ÷ 1000. Once quiet, `0x08003948` tares (`S+0x70`) and the state
+goes to 0x82.
+
+**Stopping.** In 0x82, every sample updates running sums for a least-squares line
+through the net weight since tare. After `SET+0xA8` samples (default 1000), `S+0x74`
+holds the line's current value. A counter (`S+0x7C`) rises while both the line and
+the net weight exceed target + correction, and at `SET+0xAA` counts (default 2000)
+the state goes to 0x101 and the motor stops.
+
+**Learning** (`0x0800AD52`). Runs once per weight-based shot, on the first quiet
+reading within 5000 ms of stopping. With e = target − actual in 0.01 g, and
+2 ≤ |e| < 600, the recipe's correction (`+0xC`, in 1/1000 of 0.01 g) changes by
+e × 1000 / N. N is Const. Overshot Comp. (`SET+0xF4`, default 4). If that is Off,
+N = |correction / (e × 1000)|, minimum 1. A correction of 0 takes the whole error.
+Nothing is learned after a pause or a manual top-up. `0x080079D8` saves the recipe
+table to FRAM 0x700.
+
+The shot log's weight is a different reading: `0x0800AFC6` rewrites it on every
+quiet pass until the portafilter is lifted, so it is the last quiet reading rather
+than the one learning used.
+
+**What is never learned.** Tare handles zero for each grind. Scale gain only changes
+through calibration, which averages `SET+0xC4` (default 500) readings, while the
+noise is under `SET+0xC0` (500), into `SET+0xB8` (zero) and `SET+0xBC` (span). Dose
+Timeout (`SET+0x44`) only applies to pauses.
 
 ## Logs in FRAM
 Four rings; bases at `0x24000468`, sizes at `0x24000478`, control blocks loaded
@@ -124,6 +184,22 @@ grinder on 2026-11-09.
   time in `/stats` matched the newest `/logs` row. The fields read 0 from power-up
   until the first grind finishes, because the record is in RAM.
 
+## Patches 7-8: enddecimals, finalweight
+- `enddecimals`: on the dose screen, the BL at `0x0804D59A` returns 2 decimals when
+  the state is 0x101 and the "Weight Dec. Digits" setting otherwise. Flashed on
+  2026-11-09 and seen on the grinder's screen on 2026-11-10.
+- `finalweight`: the logged weight (`0x2405AAA4+9`) is rewritten on every steady
+  pass of state 0x101 while the net weight is above 0, and the record is appended
+  once the portafilter is lifted and the state is more than `SET+0x48` ms old
+  (default 1000). The screen closes at that point, so the logged number can't be
+  shown first. The patch stops the rewrite at `0x0800AFD4` once `S+0x54` (ms in
+  this state, reset on every state change) reaches 2000 and a weight is recorded,
+  and the screen load at `0x0804D392` reads the record, falling back to the live
+  weight while it is 0 (`0x0800A88C` clears it before each grind). Dosing and
+  learning are untouched. Tested in the emulator, through the real state machine;
+  never flashed. A locked reading is no more accurate than the last steady one, so
+  this grinder keeps the live number.
+
 ## Flashing and recovery
 The Wi-Fi/web module flashes the STM32 through ST's ROM UART bootloader
 (init bootloader, remove write protection, erase, write, reboot). The
@@ -147,4 +223,4 @@ can be recovered over Wi-Fi.
 ## Status
 Patches 1-3 flashed and confirmed on hardware: actual dose on screen, disc
 distance in the FRAM record, Shot Log reachable without owner mode. Patches
-4-6 are described above. Build them with `patch.py` from the stock image.
+4-8 are described above. Build them with `patch.py` from the stock image.

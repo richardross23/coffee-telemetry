@@ -32,6 +32,7 @@ LAST_SHOT = 0x2405AAA4
 WIFI_FLAG, STATE = 0x24050618, 0x24058F80
 
 SUB_LOGS, SUB_STATS = 0x0C, 0x0B
+PATCH_CAVE = 0x0818374C          # padding after the image, where the patches' code goes
 
 
 class Grinder:
@@ -66,6 +67,20 @@ class Grinder:
             if self.fault is None:
                 mu.reg_write(UC_ARM_REG_PC, mu.reg_read(UC_ARM_REG_LR))
         self.mu.hook_add(UC_HOOK_CODE, hook, begin=addr, end=addr)
+
+    def stub_calls(self, start, end):
+        """Make every BL between start and end return 0 without running, except
+        calls into the patches' own code."""
+        image = bytes(self.mu.mem_read(start, end - start))
+        for off in range(0, len(image) - 4, 2):
+            h1, h2 = struct.unpack_from("<HH", image, off)
+            if h1 & 0xF800 == 0xF000 and h2 & 0xD000 == 0xD000:
+                s, j1, j2 = (h1 >> 10) & 1, (h2 >> 13) & 1, (h2 >> 11) & 1
+                imm = (s << 24) | ((~(j1 ^ s) & 1) << 23) | ((~(j2 ^ s) & 1) << 22)
+                imm |= ((h1 & 0x3FF) << 12) | ((h2 & 0x7FF) << 1)
+                target = start + off + 4 + (imm - (1 << 25) if s else imm)
+                if target < PATCH_CAVE:
+                    self.replace(target, lambda: 0)
 
     def next_tick(self):
         self.tick += 1
