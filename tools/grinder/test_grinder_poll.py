@@ -10,7 +10,7 @@ import datetime
 import time
 import unittest
 
-from grinder_poll import GAP_POLLS, Watcher, build_report, parse_stats, shots_in_window
+from grinder_poll import GAP_POLLS, Watcher, build_report, dose_drift, parse_stats, shots_in_window
 
 STATS = ('{"restarts":"1003","shots":"3192","lastTs":"1794210235","lastTg":"2000",'
          '"lastAc":"2001","r1Weight":"5439270","lastDisc":"156","lastGrnd":"5395",'
@@ -112,9 +112,70 @@ class ShotsInWindowTest(unittest.TestCase):
         self.assertEqual(got[0]["start"], at("08:00"))
 
 
+class DoseDriftTest(unittest.TestCase):
+    def index(self, errors, dose=20.0):
+        """Shots in time order, each landing `error` grams off the dose."""
+        return [{"saved_at": f"2026-11-01T08:{i:02d}:00Z",
+                 "metadata": {"bean_weight_g": dose, "ground_weight_g": round(dose + e, 2),
+                              "grinder_raw_ts": 1000 + i}}
+                for i, e in enumerate(errors)]
+
+    def test_a_steady_low_run_is_reported(self):
+        self.assertEqual(dose_drift(self.index([-0.6] * 10)), -0.6)
+
+    def test_a_steady_high_run_is_reported(self):
+        self.assertEqual(dose_drift(self.index([0.45] * 10)), 0.45)
+
+    def test_normal_scatter_is_silent(self):
+        self.assertIsNone(dose_drift(self.index([-0.2, 0.2] * 5)))
+
+    def test_a_small_steady_offset_is_silent(self):
+        self.assertIsNone(dose_drift(self.index([-0.2] * 10)))
+
+    def test_a_large_median_needs_most_shots_on_one_side(self):
+        self.assertIsNone(dose_drift(self.index([-0.6] * 6 + [0.5] * 4)))
+
+    def test_fewer_than_ten_shots_is_silent(self):
+        self.assertIsNone(dose_drift(self.index([-0.6] * 9)))
+
+    def test_only_the_newest_ten_count(self):
+        self.assertIsNone(dose_drift(self.index([-0.6] * 10 + [0.0] * 10)))
+        self.assertEqual(dose_drift(self.index([0.0] * 10 + [-0.6] * 10)), -0.6)
+
+    def test_order_comes_from_the_save_time(self):
+        index = self.index([0.0] * 10 + [-0.6] * 10)
+        self.assertEqual(dose_drift(list(reversed(index))), -0.6)
+
+    def test_weights_not_from_the_grinder_are_ignored(self):
+        # A shot without grinder_raw_ts may carry a weight inherited from the last one.
+        index = self.index([-0.6] * 10)
+        for entry in index:
+            del entry["metadata"]["grinder_raw_ts"]
+        self.assertIsNone(dose_drift(index))
+
+    def test_a_changed_dose_is_not_drift(self):
+        # Grinding 20 g with the shot records still saying 18 g.
+        self.assertIsNone(dose_drift(self.index([2.0] * 10, dose=18.0)))
+
+
 class BuildReportTest(unittest.TestCase):
-    def message(self, shots, outages=(), sync="not needed", filled=0):
-        return build_report("2026-11-09", shots, 3, list(outages), sync, filled)["message"]
+    def message(self, shots, outages=(), sync="not needed", filled=0, drift=None):
+        return build_report("2026-11-09", shots, 3, list(outages), sync, filled, drift)["message"]
+
+    def test_low_doses_are_mentioned(self):
+        self.assertEqual(self.message([shot("08:00")], drift=-0.61),
+                         "1 shot, with grinder data. Doses running 0.61 g under target (last 10 shots).")
+
+    def test_high_doses_are_mentioned(self):
+        self.assertEqual(self.message([shot("08:00")], drift=0.4),
+                         "1 shot, with grinder data. Doses running 0.40 g over target (last 10 shots).")
+
+    def test_no_shots_today_stays_silent_even_with_drift(self):
+        self.assertEqual(self.message([], drift=-0.61), "")
+
+    def test_report_carries_the_drift_for_home_assistant(self):
+        got = build_report("2026-11-09", [shot("08:00")], 1, [], "not needed", 0, -0.61)
+        self.assertEqual(got["dose_drift_g"], -0.61)
 
     def test_no_shots_is_silent(self):
         self.assertEqual(self.message([]), "")

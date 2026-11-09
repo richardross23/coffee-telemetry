@@ -9,6 +9,7 @@ when the shot ends, not here.
 
 When the window ends it checks the morning's shots, runs coffee-fram-sync if any
 missed its grind, and publishes a report that Home Assistant pushes to the phone.
+The report also warns if the latest doses have been landing steadily off target.
 
 launchd starts it at 06:30 and at login (com.rwross.coffee-grinder-poll.plist).
 The espresso machine's smart switch turns off at 11:00; the extra five minutes
@@ -24,6 +25,7 @@ import calendar
 import http.client
 import json
 import re
+import statistics
 import subprocess
 import sys
 import time
@@ -41,6 +43,13 @@ POLL_S = 10               # a grind is 1-2 minutes ahead of its shot
 GAP_POLLS = 3             # this many misses in a row counts as an outage
 JOIN_EVERY_S = 60
 GRIND_LOOKBACK_S = 15 * 60  # as in shot-logger
+
+# The grinder corrects a steady error within about 10 shots, so one that outlasts
+# them isn't being corrected. Normal misses average 0.17 g, on either side.
+DRIFT_SHOTS = 10
+DRIFT_LIMIT_G = 0.3
+DRIFT_SAME_SIDE = 8
+DRIFT_MAX_ERROR_G = 2.0   # further off than this, the dose was changed
 
 T_LAST = "coffee/grinder/last"
 T_REPORT = "coffee/grinder/report"
@@ -124,6 +133,26 @@ def shots_in_window(index: list[dict], start: float, end: float) -> list[dict]:
     return sorted(shots, key=lambda s: s["start"])
 
 
+def dose_drift(index: list[dict]) -> float | None:
+    """The typical error in grams of the latest shots, if they have been landing
+    steadily off target. Only weights the grinder reported count: without
+    grinder_raw_ts, ground_weight_g may be inherited from an earlier shot."""
+    errors = []
+    for entry in sorted(index, key=lambda e: e.get("saved_at") or ""):
+        meta = entry.get("metadata") or {}
+        ground, dose = meta.get("ground_weight_g"), meta.get("bean_weight_g")
+        if ("grinder_raw_ts" in meta and isinstance(ground, (int, float))
+                and isinstance(dose, (int, float)) and abs(ground - dose) < DRIFT_MAX_ERROR_G):
+            errors.append(ground - dose)
+    recent = errors[-DRIFT_SHOTS:]
+    if len(recent) < DRIFT_SHOTS:
+        return None
+    typical = statistics.median(recent)
+    if abs(typical) < DRIFT_LIMIT_G or sum(e * typical > 0 for e in recent) < DRIFT_SAME_SIDE:
+        return None
+    return round(typical, 2)
+
+
 def missing(shots: list[dict]) -> list[dict]:
     return [s for s in shots if not s["has_grinder"]]
 
@@ -133,7 +162,7 @@ def hhmm(t: float) -> str:
 
 
 def build_report(day: str, shots: list[dict], grinds: int, outages: list[tuple[float, float]],
-                 sync: str, filled: int) -> dict:
+                 sync: str, filled: int, drift: float | None = None) -> dict:
     """The morning's result. An empty message means nothing worth a push: with
     no shots, a grinder that never answered was simply switched off."""
     n, lost = len(shots), missing(shots)
@@ -156,10 +185,13 @@ def build_report(day: str, shots: list[dict], grinds: int, outages: list[tuple[f
             if any(a <= s["start"] and b >= s["start"] - GRIND_LOOKBACK_S for s in affected)]
     if gaps:
         message += " Mac lost the grinder " + ", ".join(f"{hhmm(a)}-{hhmm(b)}" for a, b in gaps) + "."
+    if n and drift is not None:
+        side = "under" if drift < 0 else "over"
+        message += f" Doses running {abs(drift):.2f} g {side} target (last {DRIFT_SHOTS} shots)."
 
     return {"date": day, "shots": n, "missing": len(lost), "grinds_seen": grinds,
             "fram_sync": sync, "outages": [[hhmm(a), hhmm(b)] for a, b in outages],
-            "message": message}
+            "dose_drift_g": drift, "message": message}
 
 
 def fetch(url: str, timeout: float) -> str | None:
@@ -180,6 +212,14 @@ def read_shots(start: float, end: float) -> list[dict] | None:
     try:
         return shots_in_window(json.loads(body), start, end) if body else None
     except ValueError:
+        return None
+
+
+def read_drift() -> float | None:
+    body = fetch(SHOT_INDEX, 10)
+    try:
+        return dose_drift(json.loads(body)) if body else None
+    except (ValueError, TypeError, AttributeError):
         return None
 
 
@@ -256,7 +296,7 @@ def main() -> int:
     if shots and missing(shots):
         shots, sync, filled = fill_missing(shots, start, end)
     report = build_report(time.strftime("%Y-%m-%d"), shots or [], watcher.grinds,
-                          watcher.outages, sync, filled)
+                          watcher.outages, sync, filled, read_drift())
     if shots is None:
         report["message"] = "Couldn't read this morning's shots."
     say(f"report: {json.dumps(report)}")

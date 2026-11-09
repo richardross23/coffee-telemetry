@@ -44,7 +44,9 @@ needs a Mac with Ethernet for the LAN and WiFi joined to the grinder.
    before its shot. One made while a shot is running waits for the next shot.
 3. At 11:05 the job counts the morning's shots and runs `coffee-fram-sync` if
    any missed its grind. `backfill.py` leaves live-matched shots alone. Then
-   it publishes a report to `coffee/grinder/report`.
+   it publishes a report to `coffee/grinder/report`. The report warns when
+   the median dose of the last 10 shots is at least 0.3 g from the shot
+   records' `bean_weight_g`, with at least 8 of them on the same side.
 
 To install, edit the constants at the top of `grinder_poll.py` and the paths
 in the plist, then:
