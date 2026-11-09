@@ -85,8 +85,9 @@ PREPEND_MAX_WEIGHT_G = 5.0   # heavier samples in this window are cup-placements
 MIN_FINAL_WEIGHT_G = 2.0     # below this, the "shot" is almost certainly a tare event
 WEIGHT_RANGE_G = (-5.0, 200.0)
 
-# A grind usually comes 1-2 minutes before its shot; allow for a slow morning.
-GRIND_LOOKBACK_SEC = 15 * 60
+# A grind usually comes 1-2 minutes before its shot. An older one is more likely
+# left over from a shot that wasn't recorded; the FRAM sync fills in any shot missed.
+GRIND_LOOKBACK_SEC = 5 * 60
 GRIND_TARGET_G = (15.0, 25.0)   # same limits as tools/grinder/backfill.py
 GRIND_MAX_DELTA_G = 5.0
 GRIND_FIELDS = ("ts", "target_cg", "actual_cg", "grind_ms", "seen_at")

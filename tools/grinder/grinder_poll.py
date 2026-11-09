@@ -42,7 +42,7 @@ WINDOW_END = "11:05"
 POLL_S = 10               # a grind is 1-2 minutes ahead of its shot
 GAP_POLLS = 3             # this many misses in a row counts as an outage
 JOIN_EVERY_S = 60
-GRIND_LOOKBACK_S = 15 * 60  # as in shot-logger
+GRIND_LOOKBACK_S = 5 * 60   # as in shot-logger
 
 # The grinder corrects a steady error within about 10 shots, so one that outlasts
 # them isn't being corrected. Normal misses average 0.17 g, on either side.

@@ -39,7 +39,7 @@ needs a Mac with Ethernet for the LAN and WiFi joined to the grinder.
 1. `grinder_poll.py` reads `/stats` every 10 seconds from 06:30 to 11:05
    and publishes each new grind, retained, to `coffee/grinder/last`.
 2. When a shot ends, `shot-logger` takes the newest unused grind the Mac saw
-   before the pump started, up to 15 minutes back, and writes the dose, grind
+   before the pump started, up to 5 minutes back, and writes the dose, grind
    time and disc distance into the shot. A grind usually comes 1-2 minutes
    before its shot. One made while a shot is running waits for the next shot.
 3. At 11:05 the job counts the morning's shots and runs `coffee-fram-sync` if

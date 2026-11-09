@@ -79,6 +79,15 @@ class GrindMatchTest(unittest.TestCase):
         logger.handle_grinder_last(grind(seen_ago=logger.GRIND_LOOKBACK_SEC + 5))
         self.assertNotIn("ground_weight_g", self.shot("a"))
 
+    def test_grind_four_minutes_before_the_shot_is_attached(self):
+        logger.handle_grinder_last(grind(seen_ago=4 * 60))
+        self.assertIn("ground_weight_g", self.shot("a"))
+
+    def test_grind_for_an_earlier_unrecorded_shot_is_not_attached(self):
+        # The next grind never reached the Mac, so this is the newest one it saw.
+        logger.handle_grinder_last(grind(seen_ago=8 * 60))
+        self.assertNotIn("ground_weight_g", self.shot("a"))
+
     def test_each_grind_is_used_once(self):
         logger.handle_grinder_last(grind())
         self.assertIn("ground_weight_g", self.shot("a"))
